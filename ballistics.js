@@ -35,7 +35,7 @@ window.Ballistics = (function(){
     
     // Feuchte Luft Dichte (vereinfacht)
     const R = 287.05;
-    const rho = pressurePa / (R * tempK) * (1 - (0.378 * (p.humidity || 0) * 6.112 * Math.exp((17.67 * p.temperatureC)/(p.temperatureC + 243.5)) / pressureHpa));
+    const rho = pressurePa / (R * tempK) * (1 - (0.378 * (p.humidity || 0) * 6.112 * Math.exp((17.67 * p.temperatureC)/(p.temperatureC + 243.5)) / p.pressureHpa));
     const soundSpeed = Math.sqrt(1.4 * R * tempK);
 
     const latRad = p.latitude * (Math.PI / 180);
