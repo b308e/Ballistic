@@ -8,7 +8,9 @@ const i18n = {
     lbl_caliber: 'Kaliber', lbl_mv: 'Mündungsgeschwindigkeit (m/s)', lbl_bc: 'Ballistischer Koeffizient (G1)',
     lbl_weight: 'Geschossgewicht (Grain)', lbl_lat: 'Breitengrad (°)', lbl_az: 'Schussrichtung (Azimut 0-360°)',
     lbl_slope: 'Höhenwinkel (°)', lbl_sensor: 'Sensoren', btn_save: 'Speichern', btn_calc: 'Berechnen',
-    lbl_temp: 'Temperatur (°C)', lbl_press: 'Luftdruck (hPa)', lbl_hum: 'Feuchtigkeit (%)', lbl_da: 'Dichtehöhe'
+    lbl_temp: 'Temperatur (°C)', lbl_press: 'Luftdruck (hPa)', lbl_hum: 'Feuchtigkeit (%)', lbl_da: 'Dichtehöhe',
+    lbl_barrel: 'Lauflänge (Zoll)', lbl_twist: 'Dralllänge (Zoll, z.B. 11 für 1:11)', lbl_grooves: 'Züge/Felder',
+    lbl_ammo_select: 'Munition wählen', lbl_ammo_custom: 'Eigene Laborierung / Manuell'
   },
   en: {
     app_sub: 'The Sniper', nav_home: 'Home', nav_weapons: 'Weapons', nav_ball: 'Ballistics', nav_tools: 'Tools', nav_setup: 'Setup',
@@ -16,14 +18,89 @@ const i18n = {
     lbl_caliber: 'Caliber', lbl_mv: 'Muzzle Velocity (m/s)', lbl_bc: 'Ballistic Coefficient (G1)',
     lbl_weight: 'Bullet Weight (Grain)', lbl_lat: 'Latitude (°)', lbl_az: 'Heading (Azimuth 0-360°)',
     lbl_slope: 'Slope Angle (°)', lbl_sensor: 'Sensors', btn_save: 'Save', btn_calc: 'Calculate',
-    lbl_temp: 'Temperature (°C)', lbl_press: 'Pressure (hPa)', lbl_hum: 'Humidity (%)', lbl_da: 'Density Altitude'
+    lbl_temp: 'Temperature (°C)', lbl_press: 'Pressure (hPa)', lbl_hum: 'Humidity (%)', lbl_da: 'Density Altitude',
+    lbl_barrel: 'Barrel Length (Inch)', lbl_twist: 'Twist Rate (Inch, e.g. 11 for 1:11)', lbl_grooves: 'Grooves/Lands',
+    lbl_ammo_select: 'Select Ammo', lbl_ammo_custom: 'Custom Load / Manual'
   }
 };
 
+// MASSIVE MUNITIONSDATENBANK
 const AMMO_DB = {
-  ".308 Win": { calMm: 7.82, data: [{ brand: "Hornady", name: "ELD-M 168gr", weight: 168, bc: 0.523, mv: 820 }, { brand: "S&B", name: "Match 168gr", weight: 168, bc: 0.490, mv: 800 }] },
-  "6.5 Creedmoor": { calMm: 6.5, data: [{ brand: "Hornady", name: "ELD-M 140gr", weight: 140, bc: 0.646, mv: 830 }, { brand: "S&B", name: "Tactical 140gr", weight: 140, bc: 0.580, mv: 810 }] },
-  ".338 Lapua Mag": { calMm: 8.6, data: [{ brand: "Hornady", name: "ELD-M 285gr", weight: 285, bc: 0.789, mv: 850 }] }
+  ".22 LR": { calMm: 5.6, data: [
+    { brand: "RWS", name: "Rifle Match", weight: 40, bc: 0.130, mv: 330 },
+    { brand: "RWS", name: "Club", weight: 40, bc: 0.125, mv: 320 },
+    { brand: "S&B", name: "Club", weight: 40, bc: 0.120, mv: 320 },
+    { brand: "Geco", name: "Rifle", weight: 40, bc: 0.128, mv: 325 },
+    { brand: "Topshot", name: "Standard", weight: 40, bc: 0.110, mv: 315 }
+  ]},
+  ".223 Rem": { calMm: 5.7, data: [
+    { brand: "Hornady", name: "V-Max 55gr", weight: 55, bc: 0.255, mv: 990 },
+    { brand: "Hornady", name: "Match BTHP 75gr", weight: 75, bc: 0.395, mv: 850 },
+    { brand: "S&B", name: "Schütte FMJ 55gr", weight: 55, bc: 0.230, mv: 950 },
+    { brand: "RWS", name: "Match 69gr", weight: 69, bc: 0.345, mv: 850 },
+    { brand: "Remington", name: "UMC 55gr", weight: 55, bc: 0.202, mv: 940 },
+    { brand: "Geco", name: "Express 55gr", weight: 55, bc: 0.225, mv: 940 }
+  ]},
+  ".243 Win": { calMm: 6.2, data: [
+    { brand: "RWS", name: "Tig 74gr", weight: 74, bc: 0.280, mv: 960 },
+    { brand: "Hornady", name: "SST 95gr", weight: 95, bc: 0.355, mv: 910 },
+    { brand: "S&B", name: "SP 100gr", weight: 100, bc: 0.330, mv: 870 }
+  ]},
+  "6.5 Creedmoor": { calMm: 6.5, data: [
+    { brand: "Hornady", name: "ELD-M 140gr", weight: 140, bc: 0.646, mv: 830 },
+    { brand: "Hornady", name: "ELD-X 143gr", weight: 143, bc: 0.625, mv: 820 },
+    { brand: "S&B", name: "Tactical 140gr", weight: 140, bc: 0.580, mv: 810 },
+    { brand: "RWS", name: "Target 139gr", weight: 139, bc: 0.550, mv: 830 },
+    { brand: "Geco", name: "Target 140gr", weight: 140, bc: 0.560, mv: 820 }
+  ]},
+  "6.5x55 SE": { calMm: 6.5, data: [
+    { brand: "S&B", name: "SP 140gr", weight: 140, bc: 0.490, mv: 800 },
+    { brand: "RWS", name: "DK 127gr", weight: 127, bc: 0.410, mv: 850 },
+    { brand: "Norma", name: "Diamond Line 130gr", weight: 130, bc: 0.450, mv: 840 }
+  ]},
+  ".270 Win": { calMm: 7.0, data: [
+    { brand: "Remington", name: "Core-Lokt 130gr", weight: 130, bc: 0.336, mv: 930 },
+    { brand: "RWS", name: "Cineshot 130gr", weight: 130, bc: 0.380, mv: 910 },
+    { brand: "Hornady", name: "SST 140gr", weight: 140, bc: 0.485, mv: 880 }
+  ]},
+  "7x64": { calMm: 7.2, data: [
+    { brand: "RWS", name: "KS 162gr", weight: 162, bc: 0.330, mv: 850 },
+    { brand: "S&B", name: "SPCE 173gr", weight: 173, bc: 0.312, mv: 790 },
+    { brand: "Geco", name: "TM 170gr", weight: 170, bc: 0.315, mv: 800 }
+  ]},
+  ".308 Win": { calMm: 7.82, data: [
+    { brand: "Hornady", name: "ELD-M 168gr", weight: 168, bc: 0.523, mv: 820 },
+    { brand: "Hornady", name: "BTHP 168gr", weight: 168, bc: 0.462, mv: 810 },
+    { brand: "S&B", name: "Match 168gr", weight: 168, bc: 0.490, mv: 800 },
+    { brand: "RWS", name: "Target Match 168gr", weight: 168, bc: 0.480, mv: 810 },
+    { brand: "RWS", name: "Evolution 165gr", weight: 165, bc: 0.390, mv: 820 },
+    { brand: "Topshot", name: "Target 168gr", weight: 168, bc: 0.450, mv: 800 },
+    { brand: "Remington", name: "Core-Lokt 180gr", weight: 180, bc: 0.360, mv: 790 },
+    { brand: "Geco", name: "Target 168gr", weight: 168, bc: 0.470, mv: 805 },
+    { brand: "Norma", name: "Diamond Line 168gr", weight: 168, bc: 0.500, mv: 815 }
+  ]},
+  ".30-06 Sprg": { calMm: 7.82, data: [
+    { brand: "RWS", name: "Evolution 184gr", weight: 184, bc: 0.380, mv: 840 },
+    { brand: "Remington", name: "Core-Lokt 150gr", weight: 150, bc: 0.314, mv: 880 },
+    { brand: "S&B", name: "SP 180gr", weight: 180, bc: 0.350, mv: 810 },
+    { brand: "Hornady", name: "SST 150gr", weight: 150, bc: 0.415, mv: 890 }
+  ]},
+  ".300 Win Mag": { calMm: 7.82, data: [
+    { brand: "Hornady", name: "ELD-M 208gr", weight: 208, bc: 0.670, mv: 880 },
+    { brand: "RWS", name: "Speed Tip 170gr", weight: 170, bc: 0.420, mv: 940 },
+    { brand: "S&B", name: "Match 190gr", weight: 190, bc: 0.550, mv: 860 }
+  ]},
+  ".338 Lapua Mag": { calMm: 8.6, data: [
+    { brand: "Hornady", name: "ELD-M 285gr", weight: 285, bc: 0.789, mv: 850 },
+    { brand: "S&B", name: "FMJ 250gr", weight: 250, bc: 0.620, mv: 900 },
+    { brand: "RWS", name: "Target 250gr", weight: 250, bc: 0.650, mv: 890 }
+  ]},
+  "9mm Luger": { calMm: 9.0, data: [
+    { brand: "S&B", name: "Schütte 115gr", weight: 115, bc: 0.150, mv: 340 },
+    { brand: "Topshot", name: "115gr", weight: 115, bc: 0.140, mv: 330 },
+    { brand: "Hornady", name: "XTP 124gr", weight: 124, bc: 0.165, mv: 320 },
+    { brand: "Geco", name: "FMJ 124gr", weight: 124, bc: 0.155, mv: 335 }
+  ]}
 };
 
 const INFO_DB = {
@@ -34,21 +111,15 @@ const INFO_DB = {
   da: { title: "Dichtehöhe (Density Altitude)", text: "Fasst Temperatur, Luftdruck und Luftfeuchtigkeit zusammen. Eine hohe Dichtehöhe (z.B. Sommer) bedeutet dünnere Luft -> das Geschoss fliegt weiter. Im Winter ist die Dichtehöhe niedriger -> mehr Luftwiderstand.", link: "https://de.wikipedia.org/wiki/Dichteh%C3%B6he" }
 };
 
-const STORE_KEY = 'sniper.v5'; // Cache-Key gebumpt
+const STORE_KEY = 'sniper.v8';
 let state = JSON.parse(localStorage.getItem(STORE_KEY)) || { weapons:[], logbook:[], settings:{ lang:'de' } };
-
-// Sicherheits-Checks für state
 if(!state.settings) state.settings = { lang: 'de' };
-if(!state.settings.lang) state.settings.lang = 'de';
 if(!state.weapons) state.weapons = [];
 if(!state.logbook) state.logbook = [];
 
 function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
-function t(key){ 
-  try { return i18n[state.settings.lang][key] || key; } 
-  catch(e) { return key; } 
-}
+function t(key){ try { return i18n[state.settings.lang][key] || key; } catch(e) { return key; } }
 function toast(msg, err){ const el=document.createElement('div'); el.className='toast'+(err?' error':''); el.textContent=msg; document.body.appendChild(el); setTimeout(()=>el.remove(),2000); }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
@@ -108,42 +179,27 @@ function handleSensor(e) {
 
 function finishSensors() {
   if (sensorSamples.length === 0) return toast('Keine Sensordaten', true);
-  
   let sumSin = 0, sumCos = 0, sumPitch = 0;
   sensorSamples.forEach(s => {
     sumSin += Math.sin(s.heading * Math.PI / 180);
     sumCos += Math.cos(s.heading * Math.PI / 180);
     sumPitch += s.pitch;
   });
-  
   const avgRad = Math.atan2(sumSin / sensorSamples.length, sumCos / sensorSamples.length);
   const avgHeading = (avgRad * (180 / Math.PI) + 360) % 360;
   const avgPitch = sumPitch / sensorSamples.length;
-  
   let maxDiff = 0;
   sensorSamples.forEach(s => {
     let hDiff = Math.abs(s.heading - avgHeading);
     if (hDiff > 180) hDiff = 360 - hDiff;
-    const pDiff = Math.abs(s.pitch - avgPitch);
-    maxDiff = Math.max(maxDiff, hDiff, pDiff);
+    maxDiff = Math.max(maxDiff, hDiff, Math.abs(s.pitch - avgPitch));
   });
-
   sensorData = { heading: avgHeading, pitch: avgPitch };
   const ampel = document.getElementById('sensorAmpel');
   const status = document.getElementById('sensorStatus');
-  
-  if (maxDiff > 5.0) {
-    ampel.style.background = 'var(--danger)';
-    status.innerText = 'Unplausibel (Zu viel Bewegung)';
-  } else if (maxDiff > 1.5) {
-    ampel.style.background = 'var(--amber)';
-    status.innerText = 'Okay (Waffe in der Hand)';
-  } else {
-    ampel.style.background = 'var(--accent)';
-    status.innerText = 'Perfekt (Ruhig)';
-    if(navigator.vibrate) navigator.vibrate(200);
-  }
-  
+  if (maxDiff > 5.0) { ampel.style.background = 'var(--danger)'; status.innerText = 'Unplausibel'; }
+  else if (maxDiff > 1.5) { ampel.style.background = 'var(--amber)'; status.innerText = 'Okay (Waffe in Hand)'; }
+  else { ampel.style.background = 'var(--accent)'; status.innerText = 'Perfekt (Ruhig)'; if(navigator.vibrate) navigator.vibrate(200); }
   document.getElementById('btnApplySensor').disabled = false;
 }
 
@@ -179,26 +235,16 @@ window.fetchWeather = function() {
   navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
-    const latEl = document.getElementById('b-lat');
-    if(latEl) latEl.value = lat.toFixed(4);
-    
+    document.getElementById('b-lat').value = lat.toFixed(4);
     try {
       const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,surface_pressure,relative_humidity_2m`);
       const data = await res.json();
-      
-      const temp = data.current.temperature_2m;
-      const press = data.current.surface_pressure;
-      const hum = data.current.relative_humidity_2m;
-      
-      if(document.getElementById('b-temp')) document.getElementById('b-temp').value = temp;
-      if(document.getElementById('b-press')) document.getElementById('b-press').value = press;
-      if(document.getElementById('b-hum')) document.getElementById('b-hum').value = hum;
-      
-      updateDensityAltitudeDisplay(temp, press);
+      document.getElementById('b-temp').value = data.current.temperature_2m;
+      document.getElementById('b-press').value = data.current.surface_pressure;
+      document.getElementById('b-hum').value = data.current.relative_humidity_2m;
+      updateDensityAltitudeDisplay(data.current.temperature_2m, data.current.surface_pressure);
       toast('Wetterdaten geladen');
-    } catch(e) {
-      toast('Wetter-API Fehler', true);
-    }
+    } catch(e) { toast('Wetter-API Fehler', true); }
   }, err => toast('GPS Fehler', true), { enableHighAccuracy: true });
 };
 
@@ -211,15 +257,10 @@ function router(){
   const hash = location.hash.replace(/^#/, '') || '/home';
   const parts = hash.split('/').filter(Boolean);
   const section = parts[0] || 'home';
-
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
-  const activeNav = document.querySelector(`.nav a[data-route="${section}"]`);
-  if(activeNav) activeNav.classList.add('active');
-  
+  document.querySelector(`.nav a[data-route="${section}"]`)?.classList.add('active');
   document.getElementById('backBtn').style.display = (parts.length>1) ? 'flex' : 'none';
-
   document.querySelectorAll('[data-i18n]').forEach(el => el.innerText = t(el.getAttribute('data-i18n')));
-
   switch(section){
     case 'home': renderHome(); break;
     case 'weapons': parts[1] ? renderWeaponForm(parts[1]) : renderWeapons(); break;
@@ -247,11 +288,10 @@ function renderWeapons() {
   pageTitle.innerText = t('title_weapons');
   const btn = document.getElementById('actionBtn');
   btn.style.display = 'flex'; btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>'; btn.onclick = () => go('#/weapons/new');
-  
   app.innerHTML = state.weapons.length ? state.weapons.map(w => `
     <div class="card tappable" onclick="go('#/weapons/${w.id}')">
       <div class="weapon-row">
-        <div><div class="weapon-name">${esc(w.name)}</div><div class="weapon-meta">${esc(w.caliber)}</div></div>
+        <div><div class="weapon-name">${esc(w.name)}</div><div class="weapon-meta">${esc(w.caliber)} ${w.barrel ? '· '+w.barrel+' Zoll' : ''}</div></div>
         <span class="badge">${w.ammo?.name || 'Manuell'}</span>
       </div>
     </div>
@@ -274,6 +314,12 @@ function renderWeaponForm(id) {
           ${Object.keys(AMMO_DB).map(c => `<option value="${c}" ${w.caliber===c?'selected':''}>${c}</option>`).join('')}
         </select>
       </div>
+      <div class="row">
+        <div class="field"><label>${t('lbl_barrel')}</label><input id="w-barrel" type="number" step="0.1" value="${w.barrel||''}" placeholder="z.B. 24"></div>
+        <div class="field"><label>${t('lbl_twist')}</label><input id="w-twist" type="number" step="0.1" value="${w.twist||''}" placeholder="z.B. 11"></div>
+      </div>
+      <div class="field"><label>${t('lbl_grooves')}</label><input id="w-grooves" type="text" value="${w.grooves||''}" placeholder="z.B. 4"></div>
+      
       <div class="field" id="ammo-db-field" style="display:${w.caliber?'block':'none'}">
         <label>Munition (Auto-Fill)</label>
         <select id="w-ammo-select"></select>
@@ -286,7 +332,7 @@ function renderWeaponForm(id) {
       </div>
       <div class="field"><label>V0 (m/s)</label><input id="w-mv" type="number" value="${w.ammo?.mv||''}"></div>
     </div>
-    <button class="btn primary block" id="saveBtn">Speichern</button>
+    <button class="btn primary block" id="saveBtn">${t('btn_save')}</button>
   `;
 
   if(w.caliber) updateAmmoDb(w.caliber);
@@ -312,6 +358,9 @@ function renderWeaponForm(id) {
       id: isEdit ? w.id : uid(),
       name: document.getElementById('w-name').value,
       caliber: document.getElementById('w-cal').value,
+      barrel: parseFloat(document.getElementById('w-barrel').value) || null,
+      twist: parseFloat(document.getElementById('w-twist').value) || null,
+      grooves: document.getElementById('w-grooves').value,
       ammo: {
         bulletWeight: parseFloat(document.getElementById('w-weight').value) || 168,
         bc: parseFloat(document.getElementById('w-bc').value) || 0.462,
@@ -327,12 +376,23 @@ function renderWeaponForm(id) {
 
 function renderBallistics() {
   pageTitle.innerText = t('title_ball');
-  // WICHTIG: Absturz verhindern, falls alte Waffe kein ammo-Objekt hat
   let w = state.weapons[0] || {};
   if (!w.ammo) w.ammo = {};
   
   app.innerHTML = `
     <div class="card">
+      <div class="field">
+        <label>${t('lbl_ammo_select')}</label>
+        <select id="b-cal-select" onchange="updateCalcAmmo(this.value)">
+          <option value="">${t('lbl_ammo_custom')}</option>
+          ${Object.keys(AMMO_DB).map(c => `<option value="${c}">${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" id="b-ammo-db-field" style="display:none">
+        <label>Spezifische Munition</label>
+        <select id="b-ammo-select"></select>
+      </div>
+
       <div class="row">
         <div class="field"><label>${t('lbl_mv')}</label><input id="b-mv" type="number" value="${w.ammo.mv||820}"></div>
         <div class="field"><label>${t('lbl_bc')} <span class="info-btn" onclick="showInfo('bc')">i</span></label><input id="b-bc" type="number" step="0.001" value="${w.ammo.bc||0.462}"></div>
@@ -377,9 +437,24 @@ function renderBallistics() {
 
   updateDensityAltitudeDisplay(15, 1013);
 
+  window.updateCalcAmmo = function(cal) {
+    const f = document.getElementById('b-ammo-db-field');
+    const sel = document.getElementById('b-ammo-select');
+    if(!cal || !AMMO_DB[cal]) { f.style.display = 'none'; return; }
+    f.style.display = 'block';
+    sel.innerHTML = AMMO_DB[cal].data.map((a,i) => `<option value="${i}">${a.brand} ${a.name}</option>`).join('');
+    sel.onchange = (e) => {
+      const d = AMMO_DB[cal].data[e.target.value];
+      document.getElementById('b-mv').value = d.mv;
+      document.getElementById('b-bc').value = d.bc;
+      document.getElementById('b-weight').value = d.weight;
+    };
+    sel.dispatchEvent(new Event('change'));
+  };
+
   document.getElementById('calcBtn').onclick = () => {
     try {
-      // Fallbacks (||) verhindern NaN, wenn ein Feld leer gelassen wurde
+      const wData = state.weapons[0] || { ammo: {} };
       const p = {
         muzzleVelocity: parseFloat(document.getElementById('b-mv').value) || 820,
         bc: parseFloat(document.getElementById('b-bc').value) || 0.462,
@@ -392,14 +467,10 @@ function renderBallistics() {
         pressureHpa: parseFloat(document.getElementById('b-press').value) || 1013,
         humidity: parseFloat(document.getElementById('b-hum').value) || 50,
         windSpeed: 0, windAngle: 90, sightHeightMm: 45,
-        caliberMm: w.ammo.calMm || 7.82, clickUnit: 'MIL', clickValue: 0.1,
+        caliberMm: wData.ammo.calMm || 7.82, clickUnit: 'MIL', clickValue: 0.1,
         distances: document.getElementById('b-dist').value.split(',').map(s => parseFloat(s)).filter(n => !isNaN(n) && n > 0)
       };
-
-      if(!window.Ballistics) {
-        return toast('Ballistik-Modul nicht geladen!', true);
-      }
-
+      if(!window.Ballistics) return toast('Ballistik-Modul nicht geladen!', true);
       const res = Ballistics.simulate(p);
       
       document.getElementById('b-results').innerHTML = `
@@ -424,10 +495,7 @@ function renderBallistics() {
           </div>
         </div>
       `;
-    } catch(err) {
-      console.error(err);
-      toast('Berechnungsfehler: ' + err.message, true);
-    }
+    } catch(err) { console.error(err); toast('Fehler: ' + err.message, true); }
   };
 }
 
@@ -441,7 +509,6 @@ function renderTools() {
       <button class="btn" onclick="calcGroup()">Auswerten</button>
       <div id="group-res" class="mt mono" style="color:var(--accent)"></div>
     </div>
-
     <div class="card">
       <h2>Mil-Dot Entfernungsrechner</h2>
       <div class="row">
@@ -452,20 +519,17 @@ function renderTools() {
       <div id="range-res" class="mt mono" style="color:var(--accent)"></div>
     </div>
   `;
-
   window.calcGroup = function() {
     try {
       const pts = document.getElementById('group-input').value.split(';').map(p => p.split(',').map(Number));
       let sumX=0, sumY=0;
       pts.forEach(p => { sumX+=p[0]; sumY+=p[1]; });
       const mrX = sumX/pts.length, mrY = sumY/pts.length;
-      
       let maxDist = 0;
       pts.forEach(p => {
         const d = Math.sqrt(Math.pow(p[0]-mrX, 2) + Math.pow(p[1]-mrY, 2));
         if(d > maxDist) maxDist = d;
       });
-      
       let es = 0;
       for(let i=0; i<pts.length; i++) {
         for(let j=i+1; j<pts.length; j++) {
@@ -476,7 +540,6 @@ function renderTools() {
       document.getElementById('group-res').innerHTML = `Mittelpunkt: X=${mrX.toFixed(1)}mm, Y=${mrY.toFixed(1)}mm<br>Streukreis (ES): ${es.toFixed(1)}mm<br>Mean Radius (MR): ${maxDist.toFixed(1)}mm`;
     } catch(e) { toast('Format falsch', true); }
   };
-
   window.calcRanging = function() {
     const size = parseFloat(document.getElementById('rd-size').value) * 10; 
     const mil = parseFloat(document.getElementById('rd-mil').value);
@@ -496,7 +559,41 @@ function renderSettings() {
         <option value="en" ${state.settings.lang==='en'?'selected':''}>English</option>
       </select>
     </div>
+    <div class="card">
+      <h3>Daten & Backup</h3>
+      <div class="hint mb">Alle Daten liegen lokal. Erstelle regelmäßig ein Backup!</div>
+      <button class="btn block" onclick="exportData()">Backup exportieren (.json)</button>
+      <button class="btn block" onclick="document.getElementById('imp-file').click()">Backup importieren</button>
+      <input type="file" id="imp-file" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
   `;
+
+  window.exportData = function() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `sniper-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Backup erstellt');
+  };
+
+  window.importData = function(event) {
+    const file = event.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if(!data.weapons) throw new Error('Ungültiges Format');
+        state = data;
+        save();
+        toast('Backup erfolgreich importiert');
+        router();
+      } catch(err) { toast('Import fehlgeschlagen', true); }
+    };
+    reader.readAsText(file);
+  };
 }
 
 })();
