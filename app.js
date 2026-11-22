@@ -34,11 +34,21 @@ const INFO_DB = {
   da: { title: "Dichtehöhe (Density Altitude)", text: "Fasst Temperatur, Luftdruck und Luftfeuchtigkeit zusammen. Eine hohe Dichtehöhe (z.B. Sommer) bedeutet dünnere Luft -> das Geschoss fliegt weiter. Im Winter ist die Dichtehöhe niedriger -> mehr Luftwiderstand.", link: "https://de.wikipedia.org/wiki/Dichteh%C3%B6he" }
 };
 
-const STORE_KEY = 'sniper.v4';
+const STORE_KEY = 'sniper.v5'; // Cache-Key gebumpt
 let state = JSON.parse(localStorage.getItem(STORE_KEY)) || { weapons:[], logbook:[], settings:{ lang:'de' } };
+
+// Sicherheits-Checks für state
+if(!state.settings) state.settings = { lang: 'de' };
+if(!state.settings.lang) state.settings.lang = 'de';
+if(!state.weapons) state.weapons = [];
+if(!state.logbook) state.logbook = [];
+
 function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
-function t(key){ return i18n[state.settings.lang][key] || key; }
+function t(key){ 
+  try { return i18n[state.settings.lang][key] || key; } 
+  catch(e) { return key; } 
+}
 function toast(msg, err){ const el=document.createElement('div'); el.className='toast'+(err?' error':''); el.textContent=msg; document.body.appendChild(el); setTimeout(()=>el.remove(),2000); }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
@@ -153,12 +163,15 @@ window.closeSensors = function() {
 
 // --- Wetter API & GPS ---
 window.updateDensityAltitudeDisplay = function(temp, press) {
-  const da = Ballistics.calcDensityAltitude(press, temp);
-  const el = document.getElementById('da-display');
-  if(el) {
-    el.innerHTML = `<span>${t('lbl_da')}: <strong>${da.toFixed(0)} m</strong></span><span class="info-btn" onclick="showInfo('da')">i</span>`;
-    el.style.color = da > 500 ? 'var(--amber)' : (da < -200 ? 'var(--accent)' : 'var(--text)');
-  }
+  try {
+    if(!window.Ballistics) return;
+    const da = Ballistics.calcDensityAltitude(press, temp);
+    const el = document.getElementById('da-display');
+    if(el) {
+      el.innerHTML = `<span>${t('lbl_da')}: <strong>${da.toFixed(0)} m</strong></span><span class="info-btn" onclick="showInfo('da')">i</span>`;
+      el.style.color = da > 500 ? 'var(--amber)' : (da < -200 ? 'var(--accent)' : 'var(--text)');
+    }
+  } catch(e) { console.error("DA Fehler", e); }
 };
 
 window.fetchWeather = function() {
@@ -166,7 +179,8 @@ window.fetchWeather = function() {
   navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
-    document.getElementById('b-lat').value = lat.toFixed(4);
+    const latEl = document.getElementById('b-lat');
+    if(latEl) latEl.value = lat.toFixed(4);
     
     try {
       const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,surface_pressure,relative_humidity_2m`);
@@ -176,9 +190,9 @@ window.fetchWeather = function() {
       const press = data.current.surface_pressure;
       const hum = data.current.relative_humidity_2m;
       
-      document.getElementById('b-temp').value = temp;
-      document.getElementById('b-press').value = press;
-      document.getElementById('b-hum').value = hum;
+      if(document.getElementById('b-temp')) document.getElementById('b-temp').value = temp;
+      if(document.getElementById('b-press')) document.getElementById('b-press').value = press;
+      if(document.getElementById('b-hum')) document.getElementById('b-hum').value = hum;
       
       updateDensityAltitudeDisplay(temp, press);
       toast('Wetterdaten geladen');
@@ -199,7 +213,9 @@ function router(){
   const section = parts[0] || 'home';
 
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
-  document.querySelector(`.nav a[data-route="${section}"]`)?.classList.add('active');
+  const activeNav = document.querySelector(`.nav a[data-route="${section}"]`);
+  if(activeNav) activeNav.classList.add('active');
+  
   document.getElementById('backBtn').style.display = (parts.length>1) ? 'flex' : 'none';
 
   document.querySelectorAll('[data-i18n]').forEach(el => el.innerText = t(el.getAttribute('data-i18n')));
@@ -278,6 +294,7 @@ function renderWeaponForm(id) {
   window.updateAmmoDb = function(cal) {
     const f = document.getElementById('ammo-db-field');
     const sel = document.getElementById('w-ammo-select');
+    if(!f || !sel) return;
     if(!cal || !AMMO_DB[cal]) { f.style.display = 'none'; return; }
     f.style.display = 'block';
     sel.innerHTML = AMMO_DB[cal].data.map((a,i) => `<option value="${i}">${a.brand} ${a.name}</option>`).join('');
@@ -296,9 +313,9 @@ function renderWeaponForm(id) {
       name: document.getElementById('w-name').value,
       caliber: document.getElementById('w-cal').value,
       ammo: {
-        bulletWeight: parseFloat(document.getElementById('w-weight').value),
-        bc: parseFloat(document.getElementById('w-bc').value),
-        mv: parseFloat(document.getElementById('w-mv').value),
+        bulletWeight: parseFloat(document.getElementById('w-weight').value) || 168,
+        bc: parseFloat(document.getElementById('w-bc').value) || 0.462,
+        mv: parseFloat(document.getElementById('w-mv').value) || 820,
         calMm: AMMO_DB[document.getElementById('w-cal').value]?.calMm || 7.82
       }
     };
@@ -310,7 +327,9 @@ function renderWeaponForm(id) {
 
 function renderBallistics() {
   pageTitle.innerText = t('title_ball');
-  const w = state.weapons[0] || { ammo:{} };
+  // WICHTIG: Absturz verhindern, falls alte Waffe kein ammo-Objekt hat
+  let w = state.weapons[0] || {};
+  if (!w.ammo) w.ammo = {};
   
   app.innerHTML = `
     <div class="card">
@@ -356,50 +375,59 @@ function renderBallistics() {
     <div id="b-results"></div>
   `;
 
-  // Init DA display
   updateDensityAltitudeDisplay(15, 1013);
 
   document.getElementById('calcBtn').onclick = () => {
-    const p = {
-      muzzleVelocity: parseFloat(document.getElementById('b-mv').value),
-      bc: parseFloat(document.getElementById('b-bc').value),
-      bulletWeight: parseFloat(document.getElementById('b-weight').value),
-      zeroDistance: parseFloat(document.getElementById('b-zero').value),
-      latitude: parseFloat(document.getElementById('b-lat').value),
-      azimuth: parseFloat(document.getElementById('b-az').value),
-      slope: parseFloat(document.getElementById('b-slope').value),
-      temperatureC: parseFloat(document.getElementById('b-temp').value),
-      pressureHpa: parseFloat(document.getElementById('b-press').value),
-      humidity: parseFloat(document.getElementById('b-hum').value),
-      windSpeed: 0, windAngle: 90, sightHeightMm: 45,
-      caliberMm: w.ammo.calMm || 7.82, clickUnit: 'MIL', clickValue: 0.1,
-      distances: document.getElementById('b-dist').value.split(',').map(Number)
-    };
+    try {
+      // Fallbacks (||) verhindern NaN, wenn ein Feld leer gelassen wurde
+      const p = {
+        muzzleVelocity: parseFloat(document.getElementById('b-mv').value) || 820,
+        bc: parseFloat(document.getElementById('b-bc').value) || 0.462,
+        bulletWeight: parseFloat(document.getElementById('b-weight').value) || 168,
+        zeroDistance: parseFloat(document.getElementById('b-zero').value) || 100,
+        latitude: parseFloat(document.getElementById('b-lat').value) || 50.0,
+        azimuth: parseFloat(document.getElementById('b-az').value) || 90,
+        slope: parseFloat(document.getElementById('b-slope').value) || 0,
+        temperatureC: parseFloat(document.getElementById('b-temp').value) || 15,
+        pressureHpa: parseFloat(document.getElementById('b-press').value) || 1013,
+        humidity: parseFloat(document.getElementById('b-hum').value) || 50,
+        windSpeed: 0, windAngle: 90, sightHeightMm: 45,
+        caliberMm: w.ammo.calMm || 7.82, clickUnit: 'MIL', clickValue: 0.1,
+        distances: document.getElementById('b-dist').value.split(',').map(s => parseFloat(s)).filter(n => !isNaN(n) && n > 0)
+      };
 
-    const res = Ballistics.simulate(p);
-    
-    document.getElementById('b-results').innerHTML = `
-      <div class="card" style="padding:12px 8px">
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>m</th><th>Drop cm</th><th>MIL</th><th>Klicks</th><th>Drift cm</th><th>Coriolis <span class="info-btn" onclick="showInfo('coriolis')">i</span></th><th>Spin <span class="info-btn" onclick="showInfo('spin')">i</span></th></tr></thead>
-            <tbody>
-              ${res.map(r => `
-                <tr>
-                  <td>${r.distance}</td>
-                  <td class="${r.dropCm<0?'neg':'pos'}">${r.dropCm.toFixed(1)}</td>
-                  <td>${r.dropMIL.toFixed(2)}</td>
-                  <td style="color:var(--amber)">+${r.clicks}</td>
-                  <td>${r.driftCm.toFixed(1)}</td>
-                  <td class="dim">${r.coriolis.toFixed(1)}</td>
-                  <td class="dim">${r.spin.toFixed(1)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+      if(!window.Ballistics) {
+        return toast('Ballistik-Modul nicht geladen!', true);
+      }
+
+      const res = Ballistics.simulate(p);
+      
+      document.getElementById('b-results').innerHTML = `
+        <div class="card" style="padding:12px 8px">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>m</th><th>Drop cm</th><th>MIL</th><th>Klicks</th><th>Drift cm</th><th>Coriolis <span class="info-btn" onclick="showInfo('coriolis')">i</span></th><th>Spin <span class="info-btn" onclick="showInfo('spin')">i</span></th></tr></thead>
+              <tbody>
+                ${res.map(r => `
+                  <tr>
+                    <td>${r.distance}</td>
+                    <td class="${r.dropCm<0?'neg':'pos'}">${r.dropCm.toFixed(1)}</td>
+                    <td>${r.dropMIL.toFixed(2)}</td>
+                    <td style="color:var(--amber)">+${r.clicks}</td>
+                    <td>${r.driftCm.toFixed(1)}</td>
+                    <td class="dim">${r.coriolis.toFixed(1)}</td>
+                    <td class="dim">${r.spin.toFixed(1)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    `;
+      `;
+    } catch(err) {
+      console.error(err);
+      toast('Berechnungsfehler: ' + err.message, true);
+    }
   };
 }
 
