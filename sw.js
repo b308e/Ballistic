@@ -1,4 +1,4 @@
-const CACHE = 'sniper-v4'; // Version gebumpt für das Update
+const CACHE = 'sniper-v6'; // Version erhöht, um Cache zu leeren'; // Version gebumpt für das Update
 const ASSETS = ['./', './index.html', './style.css', './app.js', './ballistics.js', './manifest.json'];
 
 self.addEventListener('install', (e) => {
