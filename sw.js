@@ -1,4 +1,4 @@
-const CACHE = 'sniper-v10'; // Version für das große Update
+const CACHE = 'sniper-v10.1'; // Version für das große Update
 const ASSETS = ['./', './index.html', './style.css', './app.js', './ballistics.js', './manifest.json'];
 
 self.addEventListener('install', (e) => {

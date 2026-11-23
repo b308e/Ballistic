@@ -614,9 +614,10 @@ function renderBallistics() {
       if(!window.Ballistics) return toast('Ballistik-Modul nicht geladen!', true);
       const res1 = Ballistics.simulate(p1);
       
-      let res2 = null;
+            let res2 = null;
+      let p2 = null; // Variable hier deklarieren, damit sie global im Block verfügbar ist
       if(isCompareActive) {
-        const p2 = { ...envParams,
+        p2 = { ...envParams,
           muzzleVelocity: parseFloat(document.getElementById('b-mv-2').value) || 820,
           bc: parseFloat(document.getElementById('b-bc-2').value) || 0.500,
           bulletWeight: parseFloat(document.getElementById('b-weight-2').value) || 168
