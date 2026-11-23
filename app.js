@@ -13,7 +13,8 @@ const i18n = {
     lbl_ammo_select: 'Munition wählen', lbl_ammo_custom: 'Eigene Laborierung',
     lbl_weapon_select: 'Waffe auswählen', lbl_weapon_manual: '— Manuelle Eingabe —',
     lbl_units: 'Einheiten', lbl_graph: 'Flugbahn-Vergleich (Relativ zur Visierlinie)',
-    lbl_compare: 'Munition 2 (Vergleich)', lbl_choose_geo: 'Ort auswählen'
+    lbl_compare: 'Munition 2 (Vergleich)', lbl_choose_geo: 'Ort auswählen',
+    lbl_zero_cond: 'Einschieß-Bedingungen (abweichend)', lbl_zero_temp: 'Zero Temp', lbl_zero_press: 'Zero Druck', lbl_zero_hum: 'Zero Feuchte'
   },
   en: {
     app_sub: 'The Sniper', nav_home: 'Home', nav_weapons: 'Weapons', nav_ball: 'Ballistics', nav_geo: 'Geo', nav_setup: 'Setup',
@@ -26,7 +27,8 @@ const i18n = {
     lbl_ammo_select: 'Select Ammo', lbl_ammo_custom: 'Custom Load',
     lbl_weapon_select: 'Select Weapon', lbl_weapon_manual: '— Manual Input —',
     lbl_units: 'Units', lbl_graph: 'Trajectory Comparison (Relative to LOS)',
-    lbl_compare: 'Ammo 2 (Compare)', lbl_choose_geo: 'Select Location'
+    lbl_compare: 'Ammo 2 (Compare)', lbl_choose_geo: 'Select Location',
+    lbl_zero_cond: 'Zero Conditions (Different)', lbl_zero_temp: 'Zero Temp', lbl_zero_press: 'Zero Press', lbl_zero_hum: 'Zero Hum'
   }
 };
 
@@ -128,15 +130,36 @@ const INFO_DB = {
   eotvos: { title: "Eötvös-Effekt (Vertikal)", text: "Durch die Erdrotation wirkt beim Schuss nach Osten eine etwas geringere Schwerkraft (Geschoss fällt weniger), beim Schuss nach Westen eine höhere (fällt mehr). Bei 1000m macht das ca. 5-10 cm aus.", link: "https://de.wikipedia.org/wiki/E%C3%B6tv%C3%B6s-Effekt" },
   spin: { title: "Spin Drift", text: "Durch die Rotation des Geschosses im Flug (Kreiselphysik) wandert es auf weite Distanzen leicht in Drallrichtung ab. Wird oft erst ab 600m relevant.", link: "https://de.wikipedia.org/wiki/Magnus-Effekt" },
   slope: { title: "Höhenwinkel (Rifleman's Rule)", text: "Beim Schießen bergauf oder bergab wirkt die Schwerkraft nur mit dem Kosinus des Winkels. Die effektive Distanz ist kürzer als die gemessene. Ein Schuss bergauf fällt weniger.", link: "https://de.wikipedia.org/wiki/Schuss_(Waffe)" },
-  da: { title: "Dichtehöhe (Density Altitude)", text: "Fasst Temperatur, Luftdruck und Luftfeuchtigkeit zusammen. Eine hohe Dichtehöhe (z.B. Sommer) bedeutet dünnere Luft -> das Geschoss fliegt weiter. Im Winter ist die Dichtehöhe niedriger -> mehr Luftwiderstand.", link: "https://de.wikipedia.org/wiki/Dichteh%C3%B6he" }
+  da: { title: "Dichtehöhe (Density Altitude)", text: "Fasst Temperatur, Luftdruck und Luftfeuchtigkeit zusammen. Eine hohe Dichtehöhe (z.B. Sommer) bedeutet dünnere Luft -> das Geschoss fliegt weiter. Im Winter ist die Dichtehöhe niedriger -> mehr Luftwiderstand.", link: "https://de.wikipedia.org/wiki/Dichteh%C3%B6he" },
+  zero_cond: { title: "Einschieß-Bedingungen", text: "Wenn du deine Waffe bei 30°C auf 100m eingeschossen hast, ist der Abschusswinkel fix. Wenn du jetzt bei 0°C schießt, fliegt das Geschoss anders. Hier kannst du die Bedingungen beim Einschießen eintragen, damit der Rechner den korrekten Abschusswinkel verwendet.", link: "https://de.wikipedia.org/wiki/Innenballistik" }
 };
 
-const STORE_KEY = 'sniper.v10'; // NEUE VERSION
-let state = JSON.parse(localStorage.getItem(STORE_KEY)) || { weapons:[], logbook:[], settings:{ lang:'de', units:'metric' } };
-if(!state.settings) state.settings = { lang: 'de', units: 'metric' };
-if(!state.settings.units) state.settings.units = 'metric';
-if(!state.weapons) state.weapons = [];
-if(!state.logbook) state.logbook = [];
+const STORE_KEY = 'sniper.v13'; // NEUE VERSION
+
+function loadState() {
+  let saved = localStorage.getItem(STORE_KEY);
+  if (!saved) {
+    const oldKeys = ['sniper.v12', 'sniper.v11', 'sniper.v10', 'sniper.v9', 'sniper.v8', 'sniper.v7', 'sniper.v6', 'sniper.v5', 'sniper.v4', 'sniper.v3', 'sniper.v2', 'sniper.v1'];
+    for (let key of oldKeys) {
+      saved = localStorage.getItem(key);
+      if (saved) { console.log("Alte Daten gefunden unter: " + key); break; }
+    }
+  }
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (!parsed.settings) parsed.settings = { lang: 'de', units: 'metric' };
+      if (!parsed.settings.units) parsed.settings.units = 'metric';
+      if (!parsed.weapons) parsed.weapons = [];
+      if (!parsed.logbook) parsed.logbook = [];
+      return parsed;
+    } catch(e) { console.error("Fehler beim Laden der Daten", e); }
+  }
+  return { weapons:[], logbook:[], settings:{ lang:'de', units:'metric' } };
+}
+
+let state = loadState();
+localStorage.setItem(STORE_KEY, JSON.stringify(state));
 
 function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -144,7 +167,6 @@ function t(key){ try { return i18n[state.settings.lang][key] || key; } catch(e) 
 function toast(msg, err){ const el=document.createElement('div'); el.className='toast'+(err?' error':''); el.textContent=msg; document.body.appendChild(el); setTimeout(()=>el.remove(),2000); }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
-// --- Einheiten Konvertierung ---
 function formatDist(m) {
   if(state.settings.units === 'imperial') return (m * 1.09361).toFixed(1) + ' yd';
   return m.toFixed(1) + ' m';
@@ -168,8 +190,7 @@ window.showInfo = function(key) {
 };
 window.closeInfo = () => document.getElementById('infoModal').style.display = 'none';
 
-// --- Sensors, Wetter, etc. ---
-// ... (Sensor-Logik bleibt gleich) ...
+// --- Sensors, Wetter, etc. (Unverändert) ---
 let sensorData = { heading: 0, pitch: 0 };
 let sensorSamples = [];
 let sensorInterval = null;
@@ -396,8 +417,6 @@ function renderWeaponForm(id) {
     
     if(!twist || !weight || !cal || !AMMO_DB[cal]) { box.style.display = 'none'; return; }
     
-    // Sehr stark vereinfachte Miller-Formel (Nur Heuristik für Sportkaliber)
-    // Für .308: 1:12 (bis 168), 1:11 (bis 175), 1:10 (bis 190+)
     let rec = "Optimal";
     let color = "var(--accent)";
     let warning = false;
@@ -532,6 +551,20 @@ function renderBallistics() {
       <button class="btn block" onclick="fetchWeather()" style="background:var(--accent-dim);color:var(--text);">☁️ Wetter & GPS Automatisch laden</button>
       <div class="da-badge" id="da-display"></div>
 
+      <div class="field mt">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="b-zero-cond-check" onchange="toggleZeroCond()" style="width:auto; accent-color:var(--accent);">
+          ${t('lbl_zero_cond')} <span class="info-btn" onclick="event.preventDefault();showInfo('zero_cond')">i</span>
+        </label>
+      </div>
+      <div id="b-zero-cond-fields" style="display:none; background:var(--surface-2); padding:10px; border-radius:8px; margin-bottom:12px; border:1px solid var(--border);">
+        <div class="row-3">
+          <div class="field"><label>${t('lbl_zero_temp')} (°C)</label><input id="b-zero-temp" type="number" value="30"></div>
+          <div class="field"><label>${t('lbl_zero_press')} (hPa)</label><input id="b-zero-press" type="number" value="1013"></div>
+          <div class="field"><label>${t('lbl_zero_hum')} (%)</label><input id="b-zero-hum" type="number" value="50"></div>
+        </div>
+      </div>
+
       <div class="field mt"><label>Zieldistanzen (m)</label><input id="b-dist" value="100,300,500,800,1000"></div>
     </div>
     
@@ -546,6 +579,11 @@ function renderBallistics() {
     isCompareActive = !isCompareActive;
     document.getElementById('compare-fields').style.display = isCompareActive ? 'block' : 'none';
     document.getElementById('btn-compare').innerText = isCompareActive ? 'Deaktivieren' : 'Aktivieren';
+  };
+
+  window.toggleZeroCond = function() {
+    const isChecked = document.getElementById('b-zero-cond-check').checked;
+    document.getElementById('b-zero-cond-fields').style.display = isChecked ? 'block' : 'none';
   };
 
   window.updateCalcWeapon = function(wid) {
@@ -605,6 +643,12 @@ function renderBallistics() {
         distances: document.getElementById('b-dist').value.split(',').map(s => parseFloat(s)).filter(n => !isNaN(n) && n > 0)
       };
 
+      if(document.getElementById('b-zero-cond-check').checked) {
+        envParams.zeroTemperatureC = parseFloat(document.getElementById('b-zero-temp').value) || 30;
+        envParams.zeroPressureHpa = parseFloat(document.getElementById('b-zero-press').value) || 1013;
+        envParams.zeroHumidity = parseFloat(document.getElementById('b-zero-hum').value) || 50;
+      }
+
       const p1 = { ...envParams,
         muzzleVelocity: parseFloat(document.getElementById('b-mv').value) || 820,
         bc: parseFloat(document.getElementById('b-bc').value) || 0.462,
@@ -614,8 +658,8 @@ function renderBallistics() {
       if(!window.Ballistics) return toast('Ballistik-Modul nicht geladen!', true);
       const res1 = Ballistics.simulate(p1);
       
-            let res2 = null;
-      let p2 = null; // Variable hier deklarieren, damit sie global im Block verfügbar ist
+      let res2 = null;
+      let p2 = null;
       if(isCompareActive) {
         p2 = { ...envParams,
           muzzleVelocity: parseFloat(document.getElementById('b-mv-2').value) || 820,
@@ -632,7 +676,6 @@ function renderBallistics() {
 }
 
 function renderResultsAndGraph(res1, p1, res2, p2) {
-  // --- GRAPH ERSTELLEN ---
   const maxDist = Math.max(...res1.densePath.map(d => d.d), res2 ? Math.max(...res2.densePath.map(d => d.d)) : 0);
   const minDrop = Math.min(...res1.densePath.map(d => d.drop), res2 ? Math.min(...res2.densePath.map(d => d.drop)) : 0, -10);
   const maxDrop = Math.max(...res1.densePath.map(d => d.drop), res2 ? Math.max(...res2.densePath.map(d => d.drop)) : 0, 10);
@@ -645,24 +688,25 @@ function renderResultsAndGraph(res1, p1, res2, p2) {
     return res.densePath.map((r, i) => `${i===0?'M':'L'} ${scaleX(r.d)} ${scaleY(r.drop)}`).join(' ');
   }
 
-  // Nulldurchgänge (Visierlinie)
   const zeroY = scaleY(0);
 
-  // Transonic Line (nur für Munition 1)
+  // Transonic für Munition 1
   let transonicHtml = '';
   if (res1.transonicDist && res1.transonicDist < maxDist) {
     const tx = scaleX(res1.transonicDist);
     transonicHtml = `
       <line x1="${tx}" y1="${padY}" x2="${tx}" y2="${h-padY}" stroke="var(--danger)" stroke-width="1.5" stroke-dasharray="4"/>
-      <text x="${tx}" y="${padY-5}" fill="var(--danger)" text-anchor="middle" font-size="9">Unterschall (${formatDist(res1.transonicDist)})</text>
+      <text x="${tx}" y="${padY-5}" fill="var(--danger)" text-anchor="middle" font-size="9">M1 Unterschall (${formatDist(res1.transonicDist)})</text>
     `;
   }
 
+  // Transonic für Munition 2
   let transonicHtml2 = '';
   if (res2 && res2.transonicDist && res2.transonicDist < maxDist) {
     const tx2 = scaleX(res2.transonicDist);
     transonicHtml2 = `
       <line x1="${tx2}" y1="${padY}" x2="${tx2}" y2="${h-padY}" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="2"/>
+      <text x="${tx2}" y="${padY-15}" fill="var(--amber)" text-anchor="middle" font-size="9">M2 Unterschall (${formatDist(res2.transonicDist)})</text>
     `;
   }
 
@@ -671,45 +715,43 @@ function renderResultsAndGraph(res1, p1, res2, p2) {
       <h3 style="margin-bottom:8px;font-size:12px;text-align:center;">${t('lbl_graph')}</h3>
       <div class="svg-container">
         <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;">
-          <!-- Achsen -->
           <line x1="${padX}" y1="${padY}" x2="${padX}" y2="${h-padY}" stroke="var(--border)" stroke-width="1"/>
           <line x1="${padX}" y1="${h-padY}" x2="${w-padX}" y2="${h-padY}" stroke="var(--border)" stroke-width="1"/>
           
-          <!-- Visierlinie (0 Drop) -->
           <line x1="${padX}" y1="${zeroY}" x2="${w-padX}" y2="${zeroY}" stroke="var(--text-dim)" stroke-width="1" stroke-dasharray="2"/>
           <text x="${padX-5}" y="${zeroY+4}" fill="var(--text-dim)" text-anchor="end" font-size="9">Visierlinie</text>
           
-          <!-- Y Achse Labels -->
           <text x="${padX-5}" y="${scaleY(maxDrop)+4}" fill="var(--text-dim)" text-anchor="end">${maxDrop.toFixed(0)}cm</text>
           <text x="${padX-5}" y="${scaleY(minDrop)+4}" fill="var(--text-dim)" text-anchor="end">${minDrop.toFixed(0)}cm</text>
           
-          <!-- X Achse Labels -->
           <text x="${padX}" y="${h-padY+14}" fill="var(--text-dim)" text-anchor="middle">0</text>
           <text x="${w-padX}" y="${h-padY+14}" fill="var(--text-dim)" text-anchor="middle">${maxDist.toFixed(0)}m</text>
           
-          <!-- Trajektorien -->
           <path d="${makePath(res1)}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
           ${res2 ? `<path d="${makePath(res2)}" fill="none" stroke="var(--amber)" stroke-width="2.5" stroke-linejoin="round"/>` : ''}
           
-          <!-- Transonic Markierungen -->
           ${transonicHtml}
           ${transonicHtml2}
         </svg>
       </div>
-      <div class="flex" style="justify-content:center;gap:16px;font-size:11px;">
+      <div class="flex" style="justify-content:center;gap:16px;font-size:11px; flex-wrap:wrap;">
         <div><span style="display:inline-block;width:10px;height:10px;background:var(--accent);border-radius:2px;margin-right:4px;"></span>Munition 1</div>
         ${res2 ? `<div><span style="display:inline-block;width:10px;height:10px;background:var(--amber);border-radius:2px;margin-right:4px;"></span>Munition 2</div>` : ''}
-        ${res1.transonicDist ? `<div><span style="display:inline-block;width:10px;height:10px;background:var(--danger);border-radius:2px;margin-right:4px;"></span>Unterschall</div>` : ''}
+        ${res1.transonicDist ? `<div><span style="display:inline-block;width:10px;height:10px;background:var(--danger);border-radius:2px;margin-right:4px;"></span>M1 Unterschall</div>` : ''}
+        ${res2 && res2.transonicDist ? `<div><span style="display:inline-block;width:10px;height:10px;background:var(--amber);border-radius:2px;margin-right:4px;"></span>M2 Unterschall</div>` : ''}
       </div>
     </div>
   `;
 
-  // --- TABELLE ERSTELLEN ---
   const tableHtml = `
     <div class="card" style="padding:12px 8px">
+      <div style="font-family:var(--mono); font-size:12px; margin-bottom:8px; padding:0 8px;">
+        E0 (Munition 1): <strong>${res1.E0.toFixed(0)} J</strong>
+        ${res2 ? `<br>E0 (Munition 2): <strong>${res2.E0.toFixed(0)} J</strong>` : ''}
+      </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>m</th><th>Drop cm</th><th>MIL</th><th>Klicks</th><th>v m/s</th><th>Coriolis <span class="info-btn" onclick="showInfo('coriolis')">i</span></th><th>Spin <span class="info-btn" onclick="showInfo('spin')">i</span></th></tr></thead>
+          <thead><tr><th>m</th><th>Drop cm</th><th>MIL</th><th>Klicks</th><th>v m/s</th><th>E J</th><th>Zeit s</th><th>Coriolis <span class="info-btn" onclick="showInfo('coriolis')">i</span></th><th>Spin <span class="info-btn" onclick="showInfo('spin')">i</span></th></tr></thead>
           <tbody>
             ${res1.results.map((r, i) => {
               let row = `<tr>
@@ -718,6 +760,8 @@ function renderResultsAndGraph(res1, p1, res2, p2) {
                 <td>${r.dropMIL.toFixed(2)}</td>
                 <td style="color:var(--accent)">+${r.clicks}</td>
                 <td class="dim">${r.velocity.toFixed(0)}</td>
+                <td class="dim">${r.energy.toFixed(0)}</td>
+                <td class="dim">${r.tof.toFixed(3)}</td>
                 <td class="dim">${r.coriolis.toFixed(1)}</td>
                 <td class="dim">${r.spin.toFixed(1)}</td>
               </tr>`;
@@ -730,6 +774,8 @@ function renderResultsAndGraph(res1, p1, res2, p2) {
                   <td>${r2.dropMIL.toFixed(2)}</td>
                   <td style="color:var(--amber)">+${r2.clicks}</td>
                   <td class="dim">${r2.velocity.toFixed(0)}</td>
+                  <td class="dim">${r2.energy.toFixed(0)}</td>
+                  <td class="dim">${r2.tof.toFixed(3)}</td>
                   <td class="dim">${r2.coriolis.toFixed(1)}</td>
                   <td class="dim">${r2.spin.toFixed(1)}</td>
                 </tr>`;
