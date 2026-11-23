@@ -1,18 +1,84 @@
-const CACHE = 'sniper-v0.1'; // Version für das große Update
-const ASSETS = ['./', './index.html', './style.css', './app.js', './ballistics.js', './manifest.json'];
+/**
+ * sw.js
+ * Service Worker für Offline-Caching der Ballistik & Schießbuch PWA (Version 0.1).
+ * WICHTIG: Wetter-API-Anfragen (z. B. Open-Meteo) werden NIEMALS gecacht,
+ * sondern immer direkt aus dem Netzwerk geladen.
+ */
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+const CACHE_NAME = 'sniper-v0.1';
+const STATIC_ASSETS = [
+  './',
+  './index.html',
+  './style.css',
+  './ballistics.js',
+  './app.js',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png'
+];
+
+// Installation: Statische App-Dateien in den Cache legen
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then(() => self.skipWaiting())
+  );
 });
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+// Aktivierung: Alte Cache-Versionen bereinigen
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
+      ))
+      .then(() => self.clients.claim())
+  );
 });
 
-self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
-    if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone()));
-    return res;
-  }).catch(() => caches.match('./index.html'))));
+// Fetch-Strategie:
+// 1. Wetter-API (Open-Meteo oder andere Wetter-Endpunkte) niemals cachen -> immer Netzwerk
+// 2. Lokale / statische Ressourcen -> Cache-First mit Netzwerk-Fallback und Cache-Update
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') {
+    return;
+  }
+
+  const url = new URL(request.url);
+
+  // Wetter-API niemals cachen, immer aus dem Netz laden
+  if (
+    url.hostname.includes('open-meteo.com') ||
+    url.pathname.includes('/weather') ||
+    url.searchParams.has('temperature_2m')
+  ) {
+    event.respondWith(
+      fetch(new Request(request, { cache: 'no-store' }))
+    );
+    return;
+  }
+
+  // Nur gleiche Origin cachen, damit externe Links/APIs sauber bleiben
+  if (url.origin === self.location.origin) {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        return fetch(request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseClone);
+            });
+          }
+          return networkResponse;
+        });
+      })
+    );
+  }
 });
