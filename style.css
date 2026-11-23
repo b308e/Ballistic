@@ -61,5 +61,7 @@ td.pos{color:#8fb85f} td.neg{color:#d04440}
 .info-btn{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--surface-3);color:var(--text-dim);font-size:10px;font-weight:bold;margin-left:6px;cursor:pointer;}
 .info-btn:active{background:var(--accent);color:var(--bg);}
 .da-badge{background:var(--surface-2);border:1px solid var(--border);padding:8px 12px;border-radius:8px;font-family:var(--mono);font-size:12px;margin-top:8px;display:flex;justify-content:space-between;}
+.svg-container{background:var(--surface-2);border-radius:8px;padding:10px;margin-bottom:16px;}
+.svg-container text{font-family:var(--mono);font-size:10px;fill:var(--text-dim);}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}

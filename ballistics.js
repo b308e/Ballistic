@@ -33,7 +33,6 @@ window.Ballistics = (function(){
     const tempK = p.temperatureC + 273.15;
     const pressurePa = p.pressureHpa * 100;
     
-    // Feuchte Luft Dichte (vereinfacht)
     const R = 287.05;
     const rho = pressurePa / (R * tempK) * (1 - (0.378 * (p.humidity || 0) * 6.112 * Math.exp((17.67 * p.temperatureC)/(p.temperatureC + 243.5)) / p.pressureHpa));
     const soundSpeed = Math.sqrt(1.4 * R * tempK);
@@ -57,6 +56,9 @@ window.Ballistics = (function(){
       let si=0;
       const sortedSamples = samples.slice().sort((a,b)=>a-b);
 
+      let transonicDist = null;
+      let densePath = [{d: 0, drop: -sightH * 100}];
+
       for(let i=0;i<400000 && x<maxDist;i++){
         const px=x, py=y, pz=z, pt=t;
         const rvx=vx-wx, rvy=vy, rvz=vz-wz;
@@ -71,6 +73,16 @@ window.Ballistics = (function(){
         x+=vx*dt; y+=vy*dt; z+=vz*dt;
         vx+=ax*dt; vy+=ay*dt; vz+=az*dt; t+=dt;
 
+        // Transonic check (approx Mach 1 = 340 m/s at sea level, but we use local soundSpeed)
+        if(!transonicDist && rv < soundSpeed) {
+          transonicDist = x;
+        }
+
+        // Dense path for graphing (every 5 meters)
+        if(out.length === 0 || (x - densePath[densePath.length-1].d) >= 5) {
+           densePath.push({d: x, drop: (y - sightH)*100 * Math.cos(slopeRad)});
+        }
+
         while(si<sortedSamples.length && x>=sortedSamples[si]){
           const target=sortedSamples[si];
           const f=(target-px)/(x-px||1e-9);
@@ -78,27 +90,28 @@ window.Ballistics = (function(){
           si++;
         }
       }
-      return out;
+      return { out, densePath, transonicDist };
     }
 
     let lo=0, hi=0.06;
     for(let i=0;i<28;i++){
       const mid=(lo+hi)/2;
       const r = integrate(mid, p.zeroDistance+5, [p.zeroDistance]);
-      if((r.length ? r[0].y : sightH - 1) < sightH) lo=mid; else hi=mid;
+      if((r.out.length ? r.out[0].y : sightH - 1) < sightH) lo=mid; else hi=mid;
     }
     const alpha = (lo+hi)/2 + (p.slope * Math.PI / 180);
 
     const samples = p.distances.filter(d=>d>0).sort((a,b)=>a-b);
-    const maxDist = Math.max(...samples, p.zeroDistance) + 1;
-    const raw = integrate(alpha, maxDist, samples);
+    const maxDist = Math.max(...samples, p.zeroDistance) + 100; // +100 für Graph-Puffer
+    const { out: raw, densePath, transonicDist } = integrate(alpha, maxDist, samples);
 
-    return raw.map(r=>{
+    const results = raw.map(r=>{
       const trueDropCm = (r.y - sightH) * 100;
       const dropCm = trueDropCm * Math.cos(slopeRad); 
       const driftCm = r.z * 100;
       
       const coriolisM = -(OMEGA * Math.sin(latRad) * r.distance * r.t);
+      const eotvosM = 0; // Vertikal ist bereits in geffRatio
       const spinDriftCm = (1.25 * (1 + 1.2) * Math.pow(r.t, 1.83)) * 2.54; 
       
       const finalDriftCm = driftCm + (coriolisM * 100) + spinDriftCm;
@@ -118,6 +131,8 @@ window.Ballistics = (function(){
         driftCm: finalDriftCm, coriolis: coriolisM*100, spin: spinDriftCm, clicks
       };
     });
+
+    return { results, densePath, transonicDist, soundSpeed };
   }
 
   return { simulate, calcDensityAltitude };
