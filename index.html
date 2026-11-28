@@ -1,25 +1,86 @@
 <!DOCTYPE html>
+<!-- ==========================================================================
+  index.html — Einstiegspunkt der Ballistik-PWA (v1.1.0)
+  --------------------------------------------------------------------------
+  Vanilla HTML, kein Framework, kein Build-Tool.
+  Die gesamte Oberfläche wird von app.js in #app gerendert.
+  Lade-Reihenfolge der Skripte ist PFLICHT und darf nicht geändert werden:
+    1. ballistics.js      (Physik-Engine, stellt window.Ballistics bereit)
+    2. ammo-db-long.js    (externe Langwaffen-DB, später durch echte DB ersetzbar)
+    3. ammo-db-short.js   (externe Kurzwaffen-DB, später durch echte DB ersetzbar)
+    4. app.js             (Anwendung + UX-Modul am Dateiende: Wind-Ring,
+                           Drop-Kurve, Sensor-Overlay, Messdauer, Version)
+  Kein async/defer: Die Reihenfolge muss synchron und garantiert sein.
+  Beim Austausch der DB-Dateien oder bei Updates: Cache-Version in sw.js erhöhen!
+  Das meta[name="app-version"] ist die einzige Quelle der Versionsanzeige
+  in den Einstellungen — bei einem Release hier UND in sw.js aktualisieren.
+=========================================================================== -->
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#0f172a" />
-  <meta name="description" content="Mobile-first PWA für Sportschützen: Flugbahnrechner, Waffenverwaltung, Schießtagebuch und Ballistik-Lexikon (Version 0.1)." />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Ballistik v0.1" />
-  <title>Ballistik &amp; Schießbuch PWA v0.1</title>
-  <link rel="manifest" href="./manifest.json" />
-  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
-  <link rel="apple-touch-icon" sizes="192x192" href="./icon-192.png" />
-  <link rel="stylesheet" href="./style.css" />
+  <meta charset="UTF-8">
+  <!-- Viewport: Mobile-First, viewport-fit=cover für iOS-Safe-Areas (Notch) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Offline-Flugbahnrechner für Lang- und Kurzwaffen: G1/G7-Ballistik, Coriolis, Spin Drift, Dichtehöhe, Drop-Kurve, Wind-Kompass, Hersteller-Referenzen, Waffenprofile und Schusslogbuch.">
+
+  <!-- App-Version: wird von der Versions-Karte in den Einstellungen gelesen -->
+  <meta name="app-version" content="1.1.0">
+  <meta name="application-name" content="Sniper Ballistik">
+
+  <!-- PWA: Manifest + Theme. Standard ist Dark Mode, Farbe passt zu style.css -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0a0e13">
+  <meta name="color-scheme" content="dark light">
+
+  <!-- iOS Safari: Installierte PWA im Standalone-Modus -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sniper Ballistik">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <!-- Tab-Icon als Inline-SVG (Fadenkreuz), funktioniert auch ohne PNG-Dateien.
+       icon-192.png / icon-512.png liegen im Repo und werden vom Manifest
+       und vom Service Worker erwartet. -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0e13'/%3E%3Ccircle cx='32' cy='32' r='17' fill='none' stroke='%23f5a524' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='4' fill='%23f5a524'/%3E%3Cpath d='M32 6v10M32 48v10M6 32h10M48 32h10' stroke='%2338d39f' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+
+  <title>Sniper Ballistik</title>
+
+  <!-- Einziges Stylesheet, kein Framework -->
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Wurzelknoten für das dynamische UI-Rendering -->
-  <div id="app" class="app-shell"></div>
+  <!-- Wurzelcontainer: app.js ersetzt den Boot-Splash durch die volle Oberfläche.
+       Der Splash verhindert eine leere Seite beim ersten Laden (auch offline). -->
+  <div id="app" class="app" data-theme="dark" data-view="full">
+    <div class="boot-splash">
+      <div class="boot-mark" aria-hidden="true">
+        <span class="boot-ring"></span>
+        <span class="boot-dot"></span>
+      </div>
+      <p class="boot-title">Sniper Ballistik</p>
+      <p class="boot-sub">Lade Engine &amp; Munitionsdatenbank…</p>
+    </div>
+  </div>
 
-  <!-- Wichtige Script-Reihenfolge: ballistics.js vor app.js -->
-  <script src="./ballistics.js"></script>
-  <script src="./app.js"></script>
+  <!-- Sichtbarer Hinweis, falls JavaScript deaktiviert ist -->
+  <noscript>
+    <div class="noscript-box">
+      <h1>Sniper Ballistik</h1>
+      <p>Diese App benötigt JavaScript. Bitte JavaScript im Browser aktivieren und die Seite neu laden.</p>
+      <p>This app requires JavaScript. Please enable JavaScript and reload.</p>
+    </div>
+  </noscript>
+
+  <!-- Skripte in PFLICHT-Reihenfolge: Engine vor DB, DB vor App.
+       app.js enthält selbst keine Munitionsdaten mehr; das UX-Modul
+       (Wind-Ring, Drop-Kurve, Sensorik, Version) ist an app.js angehängt. -->
+  <script src="ballistics.js"></script>
+  <script src="ammo-db-long.js"></script>
+  <script src="ammo-db-short.js"></script>
+  <script src="app.js"></script>
+
+  <script src="ux-advanced.js"></script>
+  <script src="ux-windage.js"></script>
+  <script src="ux-reticle.js"></script>
 </body>
 </html>

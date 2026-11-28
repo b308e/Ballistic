@@ -1,2213 +1,1682 @@
-/**
- * app.js
- * Hauptanwendungslogik, State-Management, i18n (DE/EN), Munitions- & Städtedatenbank,
- * LocalStorage-Persistenz & Migration, JSON-Export/Import, Wetter-API (Open-Meteo),
- * Smartphone-Sensoren (DeviceOrientationEvent), SVG-Flugbahngraph, Logbuch & Lexikon.
- *
- * App-Version: 0.1
- * Hinweis: V0-Werte in der Munitionsdatenbank sind Herstellerangaben bei ca. 24 Zoll Lauflänge
- * und können je nach Waffe und Lauflänge abweichen. Alle Berechnungen sind Näherungen.
- */
+/* ============================================================================
+ * app.js — Anwendungslogik der Ballistik-PWA
+ * ----------------------------------------------------------------------------
+ * Vanilla JS, kein Framework. Kommentare Deutsch, Variablen Englisch.
+ * Diese Datei enthält KEINE Munitionsdaten. Sie nutzt ausschließlich die
+ * extern geladenen Dateien ammo-db-long.js und ammo-db-short.js.
+ * Die Basis-DB wird nie verändert; Nutzer-Overrides liegen in LocalStorage.
+ * Fehlende Werte sind null und werden als Strich angezeigt, niemals als 0.
+ * ==========================================================================*/
+(function () {
+  'use strict';
 
-(() => {
-    'use strict';
+  var B = window.Ballistics;
+  var STORAGE_VERSION = 2;
+  var APP_ID = 'sniper-ballistik';
 
-    // Speicher- und Versions-Konstanten (App-Version 0.1)
-    const APP_VERSION = '0.1';
-    const STORAGE_KEY = 'sniper_v0_1';
-    const LEGACY_KEYS = ['sniper_data', 'sniper-v12', 'sniper_v13', 'sniper_v14', 'ballistik', 'weapons'];
+  /* --------------------------------------------------------------------------
+   * i18n — Wörterbuch Deutsch/Englisch. Format: key: [de, en]
+   * ------------------------------------------------------------------------*/
+  var I18N = {
+    appTitle: ['Sniper Ballistik', 'Sniper Ballistics'],
+    tagline: ['Offline-Flugbahnrechner', 'Offline trajectory calculator'],
+    navCalc: ['Rechner', 'Calculator'],
+    navProfiles: ['Profile', 'Profiles'],
+    navLog: ['Logbuch', 'Logbook'],
+    navSettings: ['Einstellungen', 'Settings'],
+    lexicon: ['Lexikon', 'Lexicon'],
+    theme: ['Design', 'Theme'],
+    dark: ['Dunkel', 'Dark'],
+    light: ['Hell', 'Light'],
+    language: ['Sprache', 'Language'],
+    units: ['Einheiten', 'Units'],
+    metric: ['Metrisch', 'Metric'],
+    imperial: ['Imperial', 'Imperial'],
+    view: ['Ansicht', 'View'],
+    viewFull: ['PC / Tablet', 'PC / Tablet'],
+    viewCompact: ['Smartphone kompakt', 'Phone compact'],
+    tabLong: ['Langwaffen', 'Long guns'],
+    tabShort: ['Kurzwaffen', 'Handguns'],
+    caliber: ['Kaliber', 'Caliber'],
+    loading: ['Laborierung', 'Load'],
+    genericBadge: ['Generisch, historisch, Hirtenberger 2002', 'Generic, historical, Hirtenberger 2002'],
+    compare: ['Vergleichsmodus', 'Compare mode'],
+    compareWith: ['Vergleich mit', 'Compare with'],
+    weaponType: ['Waffentyp', 'Weapon type'],
+    env: ['Umgebung & Wetter', 'Environment & weather'],
+    temperature: ['Temperatur (°C)', 'Temperature (°C)'],
+    pressure: ['Luftdruck (hPa)', 'Pressure (hPa)'],
+    humidity: ['Luftfeuchte (%)', 'Humidity (%)'],
+    altitude: ['Höhe ü. NN (m)', 'Altitude ASL (m)'],
+    windSpeed: ['Windgeschwindigkeit', 'Wind speed'],
+    windUnit: ['Windeinheit', 'Wind unit'],
+    windDir: ['Windrichtung (° relativ)', 'Wind direction (° relative)'],
+    windDirHint: ['0 = Gegenwind, 90 = von rechts, 180 = Rückenwind, 270 = von links', '0 = headwind, 90 = from right, 180 = tailwind, 270 = from left'],
+    latitude: ['Breitengrad (°)', 'Latitude (°)'],
+    azimuth: ['Schussrichtung / Azimut (°)', 'Shot direction / azimuth (°)'],
+    shotAngle: ['Schusswinkel bergauf/-ab (°)', 'Shot angle up/down (°)'],
+    coriolis: ['Coriolis & Eötvös', 'Coriolis & Eötvös'],
+    spinDrift: ['Spin Drift', 'Spin drift'],
+    shotSetup: ['Schuss-Setup', 'Shot setup'],
+    zero: ['Zero-Entfernung', 'Zero distance'],
+    sightHeight: ['Visierhöhe über Lauf (cm)', 'Sight height over bore (cm)'],
+    clickUnit: ['Klickwert', 'Click value'],
+    dragModel: ['Drag-Modell', 'Drag model'],
+    extendedRange: ['Berechnung bis 1000 m', 'Compute up to 1000 m'],
+    show25: ['25-m-Zeile aus refExtra', '25 m row from refExtra'],
+    results: ['Ergebnisse', 'Results'],
+    computedTable: ['Berechnet (Physik-Engine)', 'Computed (physics engine)'],
+    refTable: ['Hersteller-Referenz (DB)', 'Manufacturer reference (DB)'],
+    distance: ['Distanz', 'Distance'],
+    velocity: ['Geschwindigkeit', 'Velocity'],
+    energy: ['Energie', 'Energy'],
+    drop: ['Treffpunkt', 'Drop'],
+    time: ['Flugzeit', 'Time'],
+    drift: ['Abdrift', 'Drift'],
+    correction: ['Korrektur', 'Correction'],
+    clicks: ['Klicks', 'Clicks'],
+    muzzle: ['Mündung (V0 / E0)', 'Muzzle (V0 / E0)'],
+    mrd: ['MRD', 'MRD'],
+    gee: ['GEE', 'GEE'],
+    diff: ['Differenz', 'Difference'],
+    refOnlyNotice: ['Für diese Laborierung ist kein BC angegeben, daher keine Berechnung, nur Referenzwerte.', 'No BC is given for this load, therefore no computation, reference values only.'],
+    noV0Notice: ['Kein Mündungswert, keine Berechnung möglich.', 'No muzzle velocity, computation not possible.'],
+    unverified: ['Unverifiziert', 'Unverified'],
+    verified: ['Verifiziert', 'Verified'],
+    overrideActive: ['Override aktiv', 'Override active'],
+    editLoading: ['Laborierung editieren', 'Edit load'],
+    resetOverride: ['Override löschen', 'Reset override'],
+    saveOverride: ['Override speichern', 'Save override'],
+    overrideSaved: ['Override gespeichert. Basis-DB bleibt unverändert.', 'Override saved. Base DB remains untouched.'],
+    overrideReset: ['Override gelöscht.', 'Override deleted.'],
+    loadingEditor: ['Laborierungs-Editor', 'Load editor'],
+    editorHint: ['Leere Felder werden als null gespeichert und als Strich angezeigt. Die Basis-DB bleibt unverändert.', 'Empty fields are stored as null and shown as a dash. The base DB stays untouched.'],
+    weight: ['Geschossgewicht (gr)', 'Bullet weight (gr)'],
+    prefillWeight: ['Vorbelegung: Standardgewicht des Kalibers', 'Prefilled with caliber standard weight'],
+    bcG1: ['BC G1', 'BC G1'],
+    bcG7: ['BC G7', 'BC G7'],
+    v0: ['V0 (m/s)', 'V0 (m/s)'],
+    barrel: ['Lauflänge', 'Barrel length'],
+    barrelDb: ['DB-Lauflänge (mm)', 'DB barrel (mm)'],
+    refValues: ['Referenzwerte (50er-Raster)', 'Reference values (50 m grid)'],
+    dropValues: ['Treffpunkt aus DB (cm)', 'Point of impact from DB (cm)'],
+    zeroOfRef: ['Zero der Treffpunkt-Tabelle', 'Zero of the drop table'],
+    sourceNote: ['Quelle', 'Source'],
+    profiles: ['Waffenprofile', 'Weapon profiles'],
+    newProfile: ['Neues Profil', 'New profile'],
+    profileName: ['Profilname', 'Profile name'],
+    barrelIn: ['Lauflänge (Zoll)', 'Barrel length (inch)'],
+    barrelMmHint: ['Intern in mm: ', 'Internally in mm: '],
+    twist: ['Drall (Zoll/Umdrehung, negativ = links)', 'Twist (inch/turn, negative = left)'],
+    applyProfile: ['Anwenden', 'Apply'],
+    saveProfile: ['Profil speichern', 'Save profile'],
+    deleteProfile: ['Profil löschen', 'Delete profile'],
+    profileSaved: ['Profil gespeichert.', 'Profile saved.'],
+    profileDeleted: ['Profil gelöscht.', 'Profile deleted.'],
+    profileApplied: ['Profil angewendet.', 'Profile applied.'],
+    activeProfile: ['Aktives Profil', 'Active profile'],
+    noProfiles: ['Noch keine Waffenprofile. Lege eines an.', 'No weapon profiles yet. Create one.'],
+    undo: ['Rückgängig', 'Undo'],
+    restored: ['Wiederhergestellt.', 'Restored.'],
+    logbook: ['Schusslogbuch', 'Shot logbook'],
+    newEntry: ['Neuer Eintrag', 'New entry'],
+    date: ['Datum', 'Date'],
+    weapon: ['Waffe', 'Weapon'],
+    ammo: ['Munition', 'Ammunition'],
+    groupSize: ['Streukreis', 'Group size'],
+    weather: ['Wetter', 'Weather'],
+    note: ['Notiz', 'Note'],
+    saveEntry: ['Eintrag speichern', 'Save entry'],
+    entrySaved: ['Eintrag gespeichert.', 'Entry saved.'],
+    entryDeleted: ['Eintrag gelöscht.', 'Entry deleted.'],
+    noEntries: ['Noch keine Einträge.', 'No entries yet.'],
+    useWeather: ['Wetter übernehmen', 'Use current weather'],
+    fetchWeather: ['Wetter holen', 'Fetch weather'],
+    weatherLoaded: ['Wetter geladen und übernommen.', 'Weather loaded and applied.'],
+    weatherError: ['Wetter nicht verfügbar. Manuelle Eingabe nutzen.', 'Weather unavailable. Use manual input.'],
+    weatherAt: ['Wetter von', 'Weather from'],
+    gps: ['GPS', 'GPS'],
+    gpsOk: ['Position übernommen.', 'Position applied.'],
+    gpsError: ['GPS nicht verfügbar. Stadt aus der Liste wählen.', 'GPS unavailable. Pick a city from the list.'],
+    cityFallback: ['Geo-Fallback: Stadt wählen', 'Geo fallback: pick a city'],
+    chooseCity: ['— Stadt wählen —', '— Pick a city —'],
+    sensorSnapshot: ['Kompass-Snapshot', 'Compass snapshot'],
+    sensorRunning: ['Messe… 5 Werte in 2 s', 'Measuring… 5 samples in 2 s'],
+    sensorNone: ['Kein Kompass-Sensor verfügbar.', 'No compass sensor available.'],
+    sensorPermission: ['Sensor-Zugriff verweigert.', 'Sensor permission denied.'],
+    sensorSpread: ['Streuung', 'Spread'],
+    sensorHeading: ['Mittelwert', 'Circular mean'],
+    applyAzimuth: ['Als Azimut übernehmen', 'Apply as azimuth'],
+    settings: ['Einstellungen', 'Settings'],
+    dbVersions: ['Datenbank-Versionen', 'Database versions'],
+    dbLong: ['DB Lang', 'DB long'],
+    dbShort: ['DB Kurz', 'DB short'],
+    stubWarning: ['Stub-DB aktiv — echte DB-Dateien einspielen und Cache-Version in sw.js erhöhen.', 'Stub DB active — deploy real DB files and bump cache version in sw.js.'],
+    selfTest: ['Physik-Selbsttest', 'Physics self-test'],
+    testPassed: ['Bestanden', 'Passed'],
+    testFailed: ['Fehlgeschlagen', 'Failed'],
+    dataManagement: ['Daten: Export / Import', 'Data: export / import'],
+    exportProfiles: ['Profile exportieren', 'Export profiles'],
+    exportOverrides: ['Overrides exportieren', 'Export overrides'],
+    exportLogbook: ['Logbuch exportieren', 'Export logbook'],
+    exportAll: ['Alles exportieren', 'Export everything'],
+    importData: ['JSON importieren', 'Import JSON'],
+    importOk: ['Import erfolgreich.', 'Import successful.'],
+    importError: ['Import fehlgeschlagen: ungültiges Format.', 'Import failed: invalid format.'],
+    resetAll: ['Alle lokalen Daten löschen', 'Delete all local data'],
+    resetConfirm: ['Wirklich alle Profile, Overrides, Logbuch und Einstellungen löschen?', 'Really delete all profiles, overrides, logbook and settings?'],
+    resetDone: ['Lokale Daten gelöscht.', 'Local data deleted.'],
+    disclaimer: ['DB-Werte sind Herstellerangaben und Richtwerte. Sie variieren je nach Waffe, Lauflänge, Temperatur, Los und Ladung. Alle berechneten Werte sind Näherungen. Verifiziere mit echten Schussdaten.', 'DB values are manufacturer data and approximations. They vary with weapon, barrel length, temperature, lot and charge. All computed values are approximations. Verify with real shot data.'],
+    dbError: ['ammo-db-long.js oder ammo-db-short.js nicht gefunden oder falsches Format. Bitte echte DB-Datei einspielen.', 'ammo-db-long.js or ammo-db-short.js not found or wrong format. Please deploy the real DB file.'],
+    miller: ['Miller-Sg', 'Miller Sg'],
+    stabil: ['stabil', 'stable'],
+    grenzwertig: ['grenzwertig', 'marginal'],
+    instabil: ['instabil', 'unstable'],
+    densityAlt: ['Dichtehöhe', 'Density altitude'],
+    airDensity: ['Luftdichte', 'Air density'],
+    soundSpeed: ['Schallgeschwindigkeit', 'Speed of sound'],
+    transsonic: ['Transsonisch ab', 'Transsonic from'],
+    subsonic: ['Unterschall ab', 'Subsonic from'],
+    rifleman: ["Rifleman's Rule", "Rifleman's rule"],
+    riflemanHint: ['Bergauf/Bergab: Halte dich an die horizontale Äquivalenzdistanz in der Tabelle.', 'Uphill/downhill: hold for the horizontal equivalent distance in the table.'],
+    slant: ['Schräg', 'Slant'],
+    horizontal: ['Horizontal', 'Horizontal'],
+    close: ['Schließen', 'Close'],
+    cancel: ['Abbrechen', 'Cancel'],
+    save: ['Speichern', 'Save'],
+    delete: ['Löschen', 'Delete'],
+    edit: ['Editieren', 'Edit'],
+    actions: ['Aktionen', 'Actions'],
+    noDb: ['Keine gültige DB geladen.', 'No valid DB loaded.'],
+    g7Fallback: ['G7 gewählt, aber kein bcG7 vorhanden — Rechne mit G1.', 'G7 selected but no bcG7 present — computing with G1.'],
+    refZeroUnknown: ['Zero unbekannt', 'Zero unknown'],
+    windFrom: ['Wind von', 'Wind from'],
+    exportDone: ['Export erstellt.', 'Export created.'],
+    seedNote: ['Erstinitialisierung: Beispiel-Einträge angelegt.', 'First run: example entries created.']
+  };
 
-    // -------------------------------------------------------------------------
-    // 1. MUNITIONSDATENBANK (Über 40 Kaliber, über 100 Laborierungen)
-    // Hinweis: V0-Werte sind Herstellerangaben (ca. 24" Lauflänge, .22 LR ca. 18-24").
-    // -------------------------------------------------------------------------
-    const CALIBERS = [
-        { id: '22lr', name: '.22 LR', diameterIn: 0.223, defaultTwistIn: 16 },
-        { id: '17hmr', name: '.17 HMR', diameterIn: 0.172, defaultTwistIn: 9 },
-        { id: '222rem', name: '.222 Rem', diameterIn: 0.224, defaultTwistIn: 14 },
-        { id: '223rem', name: '.223 Rem / 5.56x45', diameterIn: 0.224, defaultTwistIn: 8 },
-        { id: '243win', name: '.243 Win', diameterIn: 0.243, defaultTwistIn: 9.125 },
-        { id: '6mmbr', name: '6mm BR Norma', diameterIn: 0.243, defaultTwistIn: 8 },
-        { id: '6mmcreed', name: '6mm Creedmoor', diameterIn: 0.243, defaultTwistIn: 7.5 },
-        { id: '65grendel', name: '6.5 Grendel', diameterIn: 0.264, defaultTwistIn: 8 },
-        { id: '65creed', name: '6.5 Creedmoor', diameterIn: 0.264, defaultTwistIn: 8 },
-        { id: '65prc', name: '6.5 PRC', diameterIn: 0.264, defaultTwistIn: 8 },
-        { id: '65x55se', name: '6.5x55 SE', diameterIn: 0.264, defaultTwistIn: 8.66 },
-        { id: '65x57', name: '6.5x57 / 6.5x57R', diameterIn: 0.264, defaultTwistIn: 8.66 },
-        { id: '270win', name: '.270 Win', diameterIn: 0.277, defaultTwistIn: 10 },
-        { id: '7mm08', name: '7mm-08 Rem', diameterIn: 0.284, defaultTwistIn: 9.5 },
-        { id: '7x57', name: '7x57 / 7x57R', diameterIn: 0.284, defaultTwistIn: 8.66 },
-        { id: '7x64', name: '7x64 / 7x65R', diameterIn: 0.284, defaultTwistIn: 8.66 },
-        { id: '7mmremmag', name: '7mm Rem Mag', diameterIn: 0.284, defaultTwistIn: 9.5 },
-        { id: '7prc', name: '7mm PRC', diameterIn: 0.284, defaultTwistIn: 8 },
-        { id: '308win', name: '.308 Win / 7.62x51', diameterIn: 0.308, defaultTwistIn: 10 },
-        { id: '3006', name: '.30-06 Springfield', diameterIn: 0.308, defaultTwistIn: 10 },
-        { id: '300winmag', name: '.300 Win Mag', diameterIn: 0.308, defaultTwistIn: 10 },
-        { id: '300prc', name: '.300 PRC', diameterIn: 0.308, defaultTwistIn: 8.5 },
-        { id: '300blk', name: '.300 AAC Blackout', diameterIn: 0.308, defaultTwistIn: 7 },
-        { id: '762x39', name: '7.62x39 mm', diameterIn: 0.311, defaultTwistIn: 9.5 },
-        { id: '8x57is', name: '8x57 IS / 8x57 IRS', diameterIn: 0.323, defaultTwistIn: 9.45 },
-        { id: '338lapua', name: '.338 Lapua Magnum', diameterIn: 0.338, defaultTwistIn: 9.35 },
-        { id: '338wm', name: '.338 Win Mag', diameterIn: 0.338, defaultTwistIn: 10 },
-        { id: '93x62', name: '9.3x62 / 9.3x74R', diameterIn: 0.366, defaultTwistIn: 14.17 },
-        { id: '375hh', name: '.375 H&H Mag', diameterIn: 0.375, defaultTwistIn: 12 },
-        { id: '4570', name: '.45-70 Gov\'t', diameterIn: 0.458, defaultTwistIn: 20 },
-        { id: '50bmg', name: '.50 BMG', diameterIn: 0.510, defaultTwistIn: 15 },
-        { id: '9mm', name: '9x19 mm Parabellum', diameterIn: 0.355, defaultTwistIn: 9.8 },
-        { id: '45acp', name: '.45 ACP', diameterIn: 0.451, defaultTwistIn: 16 },
-        { id: '357mag', name: '.357 Magnum', diameterIn: 0.357, defaultTwistIn: 18.75 },
-        { id: '44mag', name: '.44 Remington Magnum', diameterIn: 0.429, defaultTwistIn: 20 },
-        { id: '22wmr', name: '.22 WMR', diameterIn: 0.224, defaultTwistIn: 16 },
-        { id: '204ruger', name: '.204 Ruger', diameterIn: 0.204, defaultTwistIn: 12 },
-        { id: '2506', name: '.25-06 Rem', diameterIn: 0.257, defaultTwistIn: 10 },
-        { id: '65x47lapua', name: '6.5x47 Lapua', diameterIn: 0.264, defaultTwistIn: 8 },
-        { id: '308norma', name: '.308 Norma Magnum', diameterIn: 0.308, defaultTwistIn: 10 },
-        { id: '85x63', name: '8.5x63 / 8.5x63R', diameterIn: 0.338, defaultTwistIn: 10 },
-        { id: '416rigby', name: '.416 Rigby', diameterIn: 0.423, defaultTwistIn: 16.5 }
+  function t(key) {
+    var row = I18N[key];
+    if (!row) return key;
+    return row[state.lang === 'en' ? 1 : 0];
+  }
+
+  /* --------------------------------------------------------------------------
+   * Lexikon-Einträge mit Wikipedia-Link (Pflichtthemen)
+   * ------------------------------------------------------------------------*/
+  var LEXICON = {
+    bc: {
+      title: ['Ballistischer Koeffizient (BC)', 'Ballistic coefficient (BC)'],
+      body: [
+        'Der BC beschreibt, wie gut ein Geschoss den Luftwiderstand überwindet. Höherer BC = weniger Geschwindigkeitsverlust. G1 bezieht sich auf ein flachbodiges Standardgeschoss, G7 auf ein Boat-Tail-Standardgeschoss. G7 passt für moderne Langgeschosse meist besser; ein G1-BC ist streng genommen geschwindigkeitsabhängig.',
+        'The BC describes how well a bullet overcomes air drag. Higher BC = less velocity loss. G1 references a flat-base standard projectile, G7 a boat-tail standard. G7 usually fits modern long bullets better; a G1 BC is strictly velocity-dependent.'
+      ],
+      wiki: ['https://de.wikipedia.org/wiki/Ballistischer_Koeffizient', 'https://en.wikipedia.org/wiki/Ballistic_coefficient']
+    },
+    coriolis: {
+      title: ['Coriolis-Effekt', 'Coriolis effect'],
+      body: [
+        'Durch die Erdrotation erfährt ein Geschoss eine scheinbare Ablenkung: auf der Nordhalbkugel nach rechts, auf der Südhalbkugel nach links. Die horizontale Ablenkung wächst mit Flugzeit und Breitengrad (sin φ) und wird erst ab ca. 600–800 m relevant.',
+        'Earth rotation causes an apparent deflection: right in the northern hemisphere, left in the southern. Horizontal drift grows with time of flight and latitude (sin φ) and matters beyond roughly 600–800 m.'
+      ],
+      wiki: ['https://de.wikipedia.org/wiki/Corioliskraft', 'https://en.wikipedia.org/wiki/Coriolis_force']
+    },
+    eotvos: {
+      title: ['Eötvös-Effekt', 'Eötvös effect'],
+      body: [
+        'Ostschüsse treffen tendenziell hoch, Westschüsse tief: Die Bewegung relativ zur Erdrotation verändert die effektive Fallbeschleunigung. Der Effekt hängt vom Kosinus des Breitengrads und dem Sinus des Azimuts ab und ist eine vertikale Komponente der Coriolis-Beschleunigung.',
+        'Shots to the east tend to hit high, shots to the west low: motion relative to Earth rotation changes effective gravity. The effect depends on cos(latitude) and sin(azimuth) and is the vertical component of the Coriolis acceleration.'
+      ],
+      wiki: ['https://de.wikipedia.org/wiki/E%C3%B6tv%C3%B6s-Effekt', 'https://en.wikipedia.org/wiki/E%C3%B6tv%C3%B6s_effect']
+    },
+    spindrift: {
+      title: ['Spin Drift', 'Spin drift'],
+      body: [
+        'Ein drallstabilisiertes Geschoss driftet durch die Kreiselwirkung in Drallrichtung (Rechtsdrall → rechts). Empirische Näherung nach Litz: Drift in Zoll ≈ 1.25 · (Sg + 1.2) · Flugzeit^1.83. Ohne bekannte Geschosslänge kann Sg nicht berechnet werden und der Wert bleibt null.',
+        'A spin-stabilized bullet drifts toward the twist direction (right twist → right). Litz approximation: drift in inches ≈ 1.25 · (Sg + 1.2) · time^1.83. Without a known bullet length Sg cannot be computed and the value stays null.'
+      ],
+      wiki: ['https://en.wikipedia.org/wiki/Spin_drift', 'https://en.wikipedia.org/wiki/Spin_drift']
+    },
+    densityalt: {
+      title: ['Dichtehöhe', 'Density altitude'],
+      body: [
+        'Die Dichtehöhe ist die ISA-Höhe, bei der die aktuelle Luftdichte herrschen würde. Warme, feuchte Luft und geringer Druck erhöhen die Dichtehöhe: Das Geschoss verliert langsamer Geschwindigkeit, der Treffpunkt wandert. Die Engine nutzt die tatsächliche Luftdichte aus Temperatur, Druck und Feuchte.',
+        'Density altitude is the ISA altitude matching current air density. Warm, humid air and low pressure raise it: the bullet loses velocity more slowly and impact shifts. The engine uses actual air density from temperature, pressure and humidity.'
+      ],
+      wiki: ['https://de.wikipedia.org/wiki/Dichteh%C3%B6he', 'https://en.wikipedia.org/wiki/Density_altitude']
+    },
+    zero: {
+      title: ['Zero-Bedingungen', 'Zero conditions'],
+      body: [
+        'Der Zero-Solver bestimmt den Abschusswinkel so, dass die Flugbahn die Visierlinie auf der Zero-Entfernung schneidet — unter Null-Bedingungen: kein Wind, kein Coriolis, kein Spin Drift, Visierhöhe berücksichtigt. Standard: 100 m (Langwaffen), 25 m (Kurzwaffen). MRD und GEE sind DB-Richtwerte, keine berechneten Zusagen.',
+        'The zero solver finds the launch angle where the trajectory crosses the line of sight at the zero distance — under null conditions: no wind, no Coriolis, no spin drift, sight height included. Defaults: 100 m (long guns), 25 m (handguns). MRD and GEE are DB reference values, not computed promises.'
+      ],
+      wiki: ['https://de.wikipedia.org/wiki/Einschie%C3%9Fen', 'https://en.wikipedia.org/wiki/Sighting_in']
+    }
+  };
+
+  /* --------------------------------------------------------------------------
+   * Geo-Fallback-Liste (~25 Städte in DE, AT, CH, USA) mit Breitengrad
+   * ------------------------------------------------------------------------*/
+  var CITIES = [
+    // Deutschland
+    { n: 'Berlin', c: 'DE', lat: 52.52, lon: 13.405, alt: 34 },
+    { n: 'Hamburg', c: 'DE', lat: 53.55, lon: 9.99, alt: 6 },
+    { n: 'München', c: 'DE', lat: 48.14, lon: 11.58, alt: 520 },
+    { n: 'Köln', c: 'DE', lat: 50.94, lon: 6.96, alt: 53 },
+    { n: 'Frankfurt', c: 'DE', lat: 50.11, lon: 8.68, alt: 112 },
+    { n: 'Stuttgart', c: 'DE', lat: 48.78, lon: 9.18, alt: 245 },
+    { n: 'Dresden', c: 'DE', lat: 51.05, lon: 13.74, alt: 113 },
+    { n: 'Hannover', c: 'DE', lat: 52.37, lon: 9.73, alt: 55 },
+    { n: 'Nürnberg', c: 'DE', lat: 49.45, lon: 11.08, alt: 302 },
+    { n: 'Freiburg', c: 'DE', lat: 47.99, lon: 7.84, alt: 278 },
+    // Österreich
+    { n: 'Wien', c: 'AT', lat: 48.21, lon: 16.37, alt: 171 },
+    { n: 'Graz', c: 'AT', lat: 47.07, lon: 15.44, alt: 353 },
+    { n: 'Salzburg', c: 'AT', lat: 47.80, lon: 13.04, alt: 424 },
+    { n: 'Innsbruck', c: 'AT', lat: 47.27, lon: 11.40, alt: 574 },
+    { n: 'Klagenfurt', c: 'AT', lat: 46.62, lon: 14.31, alt: 446 },
+    // Schweiz
+    { n: 'Zürich', c: 'CH', lat: 47.38, lon: 8.54, alt: 408 },
+    { n: 'Bern', c: 'CH', lat: 46.95, lon: 7.45, alt: 540 },
+    { n: 'Basel', c: 'CH', lat: 47.56, lon: 7.59, alt: 260 },
+    { n: 'Genf', c: 'CH', lat: 46.20, lon: 6.14, alt: 375 },
+    { n: 'Chur', c: 'CH', lat: 46.85, lon: 9.53, alt: 593 },
+    // Polen (Neu)
+    { n: 'Warschau', c: 'PL', lat: 52.23, lon: 21.01, alt: 100 },
+    { n: 'Krakau', c: 'PL', lat: 50.06, lon: 19.94, alt: 220 },
+    { n: 'Breslau', c: 'PL', lat: 51.11, lon: 17.04, alt: 110 },
+    { n: 'Posen', c: 'PL', lat: 52.41, lon: 16.92, alt: 70 },
+    { n: 'Danzig', c: 'PL', lat: 54.35, lon: 18.65, alt: 15 },
+    { n: 'Lodz', c: 'PL', lat: 51.76, lon: 19.46, alt: 180 },
+    { n: 'Rzeszów', c: 'PL', lat: 50.04, lon: 21.99, alt: 200 },
+    // Ukraine (Neu)
+    { n: 'Kiew', c: 'UA', lat: 50.45, lon: 30.52, alt: 170 },
+    { n: 'Charkiw', c: 'UA', lat: 49.99, lon: 36.23, alt: 150 },
+    { n: 'Odessa', c: 'UA', lat: 46.48, lon: 30.73, alt: 40 },
+    { n: 'Dnipro', c: 'UA', lat: 48.46, lon: 35.04, alt: 80 },
+    { n: 'Donezk', c: 'UA', lat: 48.02, lon: 37.80, alt: 200 },
+    { n: 'Lwiw', c: 'UA', lat: 49.84, lon: 24.02, alt: 290 },
+    { n: 'Saporischschja', c: 'UA', lat: 47.84, lon: 35.12, alt: 110 },
+    // Russland (Neu - Europäische Teile & Ural)
+    { n: 'Moskau', c: 'RU', lat: 55.75, lon: 37.62, alt: 150 },
+    { n: 'St. Petersburg', c: 'RU', lat: 59.93, lon: 30.33, alt: 10 },
+    { n: 'Nowosibirsk', c: 'RU', lat: 55.00, lon: 82.93, alt: 160 },
+    { n: 'Jekaterinburg', c: 'RU', lat: 56.84, lon: 60.61, alt: 250 },
+    { n: 'Kasan', c: 'RU', lat: 55.79, lon: 49.10, alt: 60 },
+    { n: 'Nischni Nowgorod', c: 'RU', lat: 56.30, lon: 44.00, alt: 140 },
+    { n: 'Tscheljabinsk', c: 'RU', lat: 55.15, lon: 61.43, alt: 220 },
+    { n: 'Samara', c: 'RU', lat: 53.20, lon: 50.15, alt: 120 },
+    { n: 'Omsk', c: 'RU', lat: 54.98, lon: 73.37, alt: 100 },
+    { n: 'Rostow am Don', c: 'RU', lat: 47.23, lon: 39.72, alt: 70 },
+    { n: 'Ufa', c: 'RU', lat: 54.73, lon: 55.97, alt: 140 },
+    { n: 'Krasnojarsk', c: 'RU', lat: 56.02, lon: 92.87, alt: 140 },
+    { n: 'Perm', c: 'RU', lat: 58.01, lon: 56.25, alt: 170 },
+    { n: 'Woronesch', c: 'RU', lat: 51.67, lon: 39.20, alt: 150 },
+    { n: 'Wolgograd', c: 'RU', lat: 48.71, lon: 44.50, alt: 80 },
+    // USA (Bestehend)
+    { n: 'New York', c: 'US', lat: 40.71, lon: -74.01, alt: 10 },
+    { n: 'Los Angeles', c: 'US', lat: 34.05, lon: -118.24, alt: 93 },
+    { n: 'Chicago', c: 'US', lat: 41.88, lon: -87.63, alt: 181 },
+    { n: 'Houston', c: 'US', lat: 29.76, lon: -95.37, alt: 15 },
+    { n: 'Denver', c: 'US', lat: 39.74, lon: -104.99, alt: 1609 },
+    { n: 'Phoenix', c: 'US', lat: 33.45, lon: -112.07, alt: 331 },
+    { n: 'Seattle', c: 'US', lat: 47.61, lon: -122.33, alt: 40 }
+  ];
+
+  /* --------------------------------------------------------------------------
+   * LocalStorage mit Version + Migration
+   * ------------------------------------------------------------------------*/
+  function loadEnvelope(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && 'version' in parsed && 'data' in parsed) {
+        return migrateEnvelope(key, parsed);
+      }
+      // Legacy ohne Version: als Version 1 behandeln und migrieren.
+      return migrateEnvelope(key, { version: 1, data: parsed });
+    } catch (e) { return null; }
+  }
+
+  function migrateEnvelope(key, env) {
+    var v = env.version || 1;
+    var data = env.data;
+    if (v < 2 && key === APP_ID + '.profiles' && Array.isArray(data)) {
+      // Migration v1 -> v2: v1 speicherte barrelMm, v2 speichert barrelIn (Zoll).
+      data = data.map(function (p) {
+        var q = Object.assign({}, p);
+        if (q.barrelIn == null && q.barrelMm != null) q.barrelIn = q.barrelMm / 25.4;
+        if (q.twistIn == null) q.twistIn = null;
+        if (q.sightHeightCm == null) q.sightHeightCm = null;
+        return q;
+      });
+    }
+    return { version: STORAGE_VERSION, data: data };
+  }
+
+  function saveEnvelope(key, data) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ version: STORAGE_VERSION, data: data }));
+    } catch (e) { /* Speicher voll oder gesperrt: App läuft weiter, nur ohne Persistenz. */ }
+  }
+
+  /* --------------------------------------------------------------------------
+   * Zustand
+   * ------------------------------------------------------------------------*/
+  var state = {
+    lang: 'de', units: 'metric', theme: 'dark', view: 'auto',
+    section: 'calc',
+    weaponType: 'long',
+    sel: { long: { caliber: null, name: null }, short: { caliber: null, name: null } },
+    compareOn: false,
+    cmp: { type: 'long', caliber: null, name: null },
+    env: {
+      tempC: 15, pressureHpa: 1013.25, humidityPct: 50, altitudeM: null,
+      windSpeedMs: 0, windUnit: 'ms', windAngleDeg: 0,
+      latitudeDeg: null, azimuthDeg: 0, shotAngleDeg: 0,
+      enableCoriolis: false, enableSpinDrift: false,
+      locationName: null
+    },
+    shot: { zeroM: null, sightHeightCm: null, clickUnit: 'mil01', dragModel: 'G1', extended: false, show25: false },
+    profiles: [], activeProfileId: null,
+    overrides: {},
+    logbook: [],
+    lastWeather: null,
+    sensor: null, sensorRunning: false,
+    selfTest: null,
+    dbOk: false, dbIssues: []
+  };
+
+  var saveTimer = null;
+  function persistSettings() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      saveEnvelope(APP_ID + '.settings', {
+        lang: state.lang, units: state.units, theme: state.theme, view: state.view,
+        weaponType: state.weaponType, sel: state.sel, compareOn: state.compareOn, cmp: state.cmp,
+        env: state.env, shot: state.shot, activeProfileId: state.activeProfileId
+      });
+    }, 250);
+  }
+
+  function restoreState() {
+    var s = loadEnvelope(APP_ID + '.settings');
+    if (s && s.data) {
+      var d = s.data;
+      ['lang', 'units', 'theme', 'view', 'weaponType', 'compareOn', 'activeProfileId'].forEach(function (k) {
+        if (d[k] != null) state[k] = d[k];
+      });
+      if (d.sel) state.sel = Object.assign(state.sel, d.sel);
+      if (d.cmp) state.cmp = Object.assign(state.cmp, d.cmp);
+      if (d.env) state.env = Object.assign(state.env, d.env);
+      if (d.shot) state.shot = Object.assign(state.shot, d.shot);
+    }
+    var p = loadEnvelope(APP_ID + '.profiles');
+    state.profiles = p && Array.isArray(p.data) ? p.data : [];
+    var o = loadEnvelope(APP_ID + '.overrides');
+    state.overrides = o && o.data && typeof o.data === 'object' ? o.data : {};
+    var l = loadEnvelope(APP_ID + '.logbook');
+    state.logbook = l && Array.isArray(l.data) ? l.data : [];
+    if (!l) seedLogbook();
+    if (state.view === 'auto') {
+      state.view = window.matchMedia && window.matchMedia('(max-width: 760px)').matches ? 'compact' : 'full';
+    }
+  }
+
+  /* Beispiel-Einträge beim allerersten Start (editierbar/löschbar). */
+  function seedLogbook() {
+    state.logbook = [
+      { id: uid(), date: '2026-11-21', weapon: '.308 Win, 24" Lauf', ammo: '168gr Match', distanceM: 100, groupCm: 2.4, weather: '8 °C, 1016 hPa, Wind 2 m/s von links', note: 'Zero kontrolliert, 5 Schuss liegend aufgelegt.' },
+      { id: uid(), date: '2026-11-14', weapon: '.308 Win, 24" Lauf', ammo: '168gr Match', distanceM: 200, groupCm: 3.8, weather: '11 °C, 1012 hPa, windstill', note: 'Gruppe sitzt 1 cm tief, Optik 2 Klicks hoch.' },
+      { id: uid(), date: '2026-11-02', weapon: '9 mm Luger, 4" Lauf', ammo: '124gr FMJ', distanceM: 25, groupCm: 4.5, weather: 'Halle, 18 °C', note: 'Neue Griffschalen, Funktionstest.' }
     ];
+    saveEnvelope(APP_ID + '.logbook', state.logbook);
+  }
 
-    const FACTORY_LOADS = [
-        { id: 'l1', caliber: '22lr', maker: 'RWS', bullet: 'R50 Match', grains: 40, bc: 0.130, v0: 330 },
-        { id: 'l2', caliber: '22lr', maker: 'Lapua', bullet: 'Center-X', grains: 40, bc: 0.132, v0: 327 },
-        { id: 'l3', caliber: '22lr', maker: 'CCI', bullet: 'Standard Velocity LRN', grains: 40, bc: 0.125, v0: 326 },
-        { id: 'l4', caliber: '22lr', maker: 'CCI', bullet: 'Mini-Mag CPRN', grains: 36, bc: 0.095, v0: 384 },
-        { id: 'l5', caliber: '22lr', maker: 'SK', bullet: 'Long Range Match', grains: 40, bc: 0.135, v0: 329 },
-        { id: 'l6', caliber: '17hmr', maker: 'Hornady', bullet: 'V-MAX', grains: 17, bc: 0.125, v0: 777 },
-        { id: 'l7', caliber: '17hmr', maker: 'CCI', bullet: 'A17 Varmint Tip', grains: 17, bc: 0.125, v0: 808 },
-        { id: 'l8', caliber: '17hmr', maker: 'Federal', bullet: 'Premium V-Shok', grains: 17, bc: 0.125, v0: 777 },
-        { id: 'l9', caliber: '222rem', maker: 'RWS', bullet: 'SJ 3.24g (50gr)', grains: 50, bc: 0.215, v0: 970 },
-        { id: 'l10', caliber: '222rem', maker: 'S&B', bullet: 'SP 3.24g (50gr)', grains: 50, bc: 0.205, v0: 960 },
-        { id: 'l11', caliber: '222rem', maker: 'Norma', bullet: 'Oryx 3.6g (55gr)', grains: 55, bc: 0.245, v0: 920 },
-        { id: 'l12', caliber: '223rem', maker: 'Hornady', bullet: 'ELD Match', grains: 75, bc: 0.435, v0: 850 },
-        { id: 'l13', caliber: '223rem', maker: 'Federal', bullet: 'Gold Medal Sierra MatchKing', grains: 77, bc: 0.372, v0: 826 },
-        { id: 'l14', caliber: '223rem', maker: 'S&B', bullet: 'FMJ 55gr', grains: 55, bc: 0.243, v0: 990 },
-        { id: 'l15', caliber: '223rem', maker: 'RWS', bullet: 'Hit 55gr', grains: 55, bc: 0.235, v0: 975 },
-        { id: 'l16', caliber: '223rem', maker: 'Geco', bullet: 'Express 55gr', grains: 55, bc: 0.240, v0: 995 },
-        { id: 'l17', caliber: '243win', maker: 'Hornady', bullet: 'ELD-X', grains: 90, bc: 0.405, v0: 930 },
-        { id: 'l18', caliber: '243win', maker: 'Federal', bullet: 'Power-Shok SP', grains: 100, bc: 0.340, v0: 902 },
-        { id: 'l19', caliber: '243win', maker: 'RWS', bullet: 'KS 6.2g (95gr)', grains: 95, bc: 0.330, v0: 940 },
-        { id: 'l20', caliber: '6mmbr', maker: 'Lapua', bullet: 'Scenar-L', grains: 105, bc: 0.530, v0: 865 },
-        { id: 'l21', caliber: '6mmcreed', maker: 'Hornady', bullet: 'ELD Match', grains: 108, bc: 0.536, v0: 902 },
-        { id: 'l22', caliber: '6mmcreed', maker: 'Federal', bullet: 'Berger Hybrid Target', grains: 105, bc: 0.534, v0: 900 },
-        { id: 'l23', caliber: '65grendel', maker: 'Hornady', bullet: 'ELD Match', grains: 123, bc: 0.510, v0: 785 },
-        { id: 'l24', caliber: '65grendel', maker: 'Lapua', bullet: 'Scenar', grains: 123, bc: 0.527, v0: 790 },
-        { id: 'l25', caliber: '65creed', maker: 'Hornady', bullet: 'ELD-M', grains: 140, bc: 0.610, v0: 820 },
-        { id: 'l26', caliber: '65creed', maker: 'Hornady', bullet: 'ELD-X', grains: 143, bc: 0.625, v0: 826 },
-        { id: 'l27', caliber: '65creed', maker: 'Federal', bullet: 'Gold Medal Berger Hybrid', grains: 140, bc: 0.618, v0: 814 },
-        { id: 'l28', caliber: '65creed', maker: 'S&B', bullet: 'Match HPBT', grains: 142, bc: 0.595, v0: 810 },
-        { id: 'l29', caliber: '65creed', maker: 'Lapua', bullet: 'Scenar-L', grains: 136, bc: 0.568, v0: 830 },
-        { id: 'l30', caliber: '65prc', maker: 'Hornady', bullet: 'ELD Match', grains: 147, bc: 0.697, v0: 887 },
-        { id: 'l31', caliber: '65prc', maker: 'Hornady', bullet: 'Precision Hunter ELD-X', grains: 143, bc: 0.625, v0: 901 },
-        { id: 'l32', caliber: '65x55se', maker: 'Norma', bullet: 'Golden Target', grains: 130, bc: 0.509, v0: 820 },
-        { id: 'l33', caliber: '65x55se', maker: 'Lapua', bullet: 'Mega', grains: 156, bc: 0.365, v0: 760 },
-        { id: 'l34', caliber: '65x57', maker: 'RWS', bullet: 'DK 9.1g (140gr)', grains: 140, bc: 0.440, v0: 850 },
-        { id: 'l35', caliber: '270win', maker: 'Federal', bullet: 'Power-Shok', grains: 130, bc: 0.408, v0: 933 },
-        { id: 'l36', caliber: '270win', maker: 'Hornady', bullet: 'ELD-X', grains: 145, bc: 0.536, v0: 895 },
-        { id: 'l37', caliber: '270win', maker: 'RWS', bullet: 'ID Classic 8.4g (130gr)', grains: 130, bc: 0.340, v0: 930 },
-        { id: 'l38', caliber: '7mm08', maker: 'Hornady', bullet: 'ELD-X', grains: 150, bc: 0.574, v0: 825 },
-        { id: 'l39', caliber: '7mm08', maker: 'Federal', bullet: 'Fusion', grains: 140, bc: 0.420, v0: 869 },
-        { id: 'l40', caliber: '7x57', maker: 'S&B', bullet: 'SPCE 11.2g (173gr)', grains: 173, bc: 0.385, v0: 755 },
-        { id: 'l41', caliber: '7x64', maker: 'RWS', bullet: 'HIT 9.1g (140gr)', grains: 140, bc: 0.355, v0: 900 },
-        { id: 'l42', caliber: '7x64', maker: 'Geco', bullet: 'Plus 11.0g (170gr)', grains: 170, bc: 0.390, v0: 820 },
-        { id: 'l43', caliber: '7x64', maker: 'S&B', bullet: 'PTS 10.5g (162gr)', grains: 162, bc: 0.515, v0: 855 },
-        { id: 'l44', caliber: '7mmremmag', maker: 'Federal', bullet: 'Terminal Ascent', grains: 155, bc: 0.531, v0: 945 },
-        { id: 'l45', caliber: '7mmremmag', maker: 'Hornady', bullet: 'ELD-X', grains: 162, bc: 0.631, v0: 896 },
-        { id: 'l46', caliber: '7prc', maker: 'Hornady', bullet: 'ELD Match', grains: 180, bc: 0.796, v0: 914 },
-        { id: 'l47', caliber: '7prc', maker: 'Hornady', bullet: 'ELD-X', grains: 175, bc: 0.689, v0: 914 },
-        { id: 'l48', caliber: '308win', maker: 'Hornady', bullet: '168gr ELD-M', grains: 168, bc: 0.520, v0: 810 },
-        { id: 'l49', caliber: '308win', maker: 'Hornady', bullet: 'ELD Match', grains: 178, bc: 0.535, v0: 792 },
-        { id: 'l50', caliber: '308win', maker: 'Federal', bullet: 'Gold Medal Sierra MatchKing', grains: 168, bc: 0.462, v0: 808 },
-        { id: 'l51', caliber: '308win', maker: 'Federal', bullet: 'Gold Medal SMK', grains: 175, bc: 0.505, v0: 792 },
-        { id: 'l52', caliber: '308win', maker: 'Lapua', bullet: 'Scenar-L', grains: 175, bc: 0.508, v0: 785 },
-        { id: 'l53', caliber: '308win', maker: 'RWS', bullet: 'Target Elite Plus', grains: 168, bc: 0.470, v0: 800 },
-        { id: 'l54', caliber: '308win', maker: 'S&B', bullet: 'Match HPBT', grains: 168, bc: 0.462, v0: 790 },
-        { id: 'l55', caliber: '308win', maker: 'Geco', bullet: 'Target 170gr', grains: 170, bc: 0.410, v0: 785 },
-        { id: 'l56', caliber: '3006', maker: 'Hornady', bullet: 'ELD-X', grains: 178, bc: 0.535, v0: 823 },
-        { id: 'l57', caliber: '3006', maker: 'RWS', bullet: 'HIT 10.7g (165gr)', grains: 165, bc: 0.415, v0: 860 },
-        { id: 'l58', caliber: '3006', maker: 'Federal', bullet: 'Power-Shok', grains: 180, bc: 0.474, v0: 823 },
-        { id: 'l59', caliber: '3006', maker: 'S&B', bullet: 'SPCE 180gr', grains: 180, bc: 0.390, v0: 800 },
-        { id: 'l60', caliber: '300winmag', maker: 'Hornady', bullet: 'ELD Match', grains: 195, bc: 0.587, v0: 880 },
-        { id: 'l61', caliber: '300winmag', maker: 'Federal', bullet: 'Gold Medal Berger Hybrid', grains: 215, bc: 0.710, v0: 823 },
-        { id: 'l62', caliber: '300winmag', maker: 'Lapua', bullet: 'Scenar-L', grains: 185, bc: 0.545, v0: 895 },
-        { id: 'l63', caliber: '300winmag', maker: 'RWS', bullet: 'Speed Tip Pro', grains: 165, bc: 0.470, v0: 940 },
-        { id: 'l64', caliber: '300prc', maker: 'Hornady', bullet: 'ELD Match', grains: 225, bc: 0.777, v0: 858 },
-        { id: 'l65', caliber: '300prc', maker: 'Federal', bullet: 'Terminal Ascent', grains: 200, bc: 0.590, v0: 890 },
-        { id: 'l66', caliber: '300blk', maker: 'Hornady', bullet: 'SUB-X Subsonic', grains: 190, bc: 0.365, v0: 320 },
-        { id: 'l67', caliber: '300blk', maker: 'Barnes', bullet: 'VOR-TX TAC-TX', grains: 110, bc: 0.298, v0: 724 },
-        { id: 'l68', caliber: '762x39', maker: 'S&B', bullet: 'FMJ 123gr', grains: 123, bc: 0.275, v0: 738 },
-        { id: 'l69', caliber: '762x39', maker: 'Hornady', bullet: 'SST', grains: 123, bc: 0.295, v0: 716 },
-        { id: 'l70', caliber: '8x57is', maker: 'RWS', bullet: 'HIT 10.4g (160gr)', grains: 160, bc: 0.360, v0: 850 },
-        { id: 'l71', caliber: '8x57is', maker: 'Geco', bullet: 'Teilmantel 12.7g (196gr)', grains: 196, bc: 0.315, v0: 770 },
-        { id: 'l72', caliber: '8x57is', maker: 'S&B', bullet: 'FMJ 196gr', grains: 196, bc: 0.335, v0: 765 },
-        { id: 'l73', caliber: '338lapua', maker: 'Lapua', bullet: 'Scenar', grains: 250, bc: 0.615, v0: 900 },
-        { id: 'l74', caliber: '338lapua', maker: 'Lapua', bullet: 'Scenar', grains: 300, bc: 0.736, v0: 825 },
-        { id: 'l75', caliber: '338lapua', maker: 'Hornady', bullet: 'ELD Match', grains: 285, bc: 0.775, v0: 826 },
-        { id: 'l76', caliber: '338wm', maker: 'Federal', bullet: 'Fusion', grains: 225, bc: 0.495, v0: 853 },
-        { id: 'l77', caliber: '338wm', maker: 'Hornady', bullet: 'ELD-X', grains: 230, bc: 0.623, v0: 860 },
-        { id: 'l78', caliber: '93x62', maker: 'RWS', bullet: 'UNI Classic 19.0g (293gr)', grains: 293, bc: 0.410, v0: 720 },
-        { id: 'l79', caliber: '93x62', maker: 'Norma', bullet: 'Oryx 18.5g (285gr)', grains: 285, bc: 0.330, v0: 720 },
-        { id: 'l80', caliber: '375hh', maker: 'Federal', bullet: 'Swift A-Frame', grains: 300, bc: 0.420, v0: 771 },
-        { id: 'l81', caliber: '4570', maker: 'Hornady', bullet: 'LEVERevolution FTX', grains: 325, bc: 0.230, v0: 625 },
-        { id: 'l82', caliber: '50bmg', maker: 'Hornady', bullet: 'A-MAX', grains: 750, bc: 1.050, v0: 859 },
-        { id: 'l83', caliber: '9mm', maker: 'Geco', bullet: 'HEXAGON 124gr', grains: 124, bc: 0.165, v0: 360 },
-        { id: 'l84', caliber: '9mm', maker: 'Magtech', bullet: 'FMJ 115gr', grains: 115, bc: 0.145, v0: 346 },
-        { id: 'l85', caliber: '45acp', maker: 'Federal', bullet: 'American Eagle FMJ', grains: 230, bc: 0.195, v0: 271 },
-        { id: 'l86', caliber: '357mag', maker: 'Magtech', bullet: 'SJHP 158gr', grains: 158, bc: 0.180, v0: 376 },
-        { id: 'l87', caliber: '44mag', maker: 'Hornady', bullet: 'XTP 240gr', grains: 240, bc: 0.200, v0: 411 },
-        { id: 'l88', caliber: '22wmr', maker: 'CCI', bullet: 'TNT Green', grains: 30, bc: 0.095, v0: 671 },
-        { id: 'l89', caliber: '204ruger', maker: 'Hornady', bullet: 'V-MAX', grains: 32, bc: 0.210, v0: 1288 },
-        { id: 'l90', caliber: '204ruger', maker: 'Hornady', bullet: 'V-MAX', grains: 40, bc: 0.275, v0: 1116 },
-        { id: 'l91', caliber: '2506', maker: 'Hornady', bullet: 'ELD-X', grains: 110, bc: 0.458, v0: 960 },
-        { id: 'l92', caliber: '2506', maker: 'Federal', bullet: 'Non-Typical', grains: 117, bc: 0.360, v0: 911 },
-        { id: 'l93', caliber: '65x47lapua', maker: 'Lapua', bullet: 'Scenar-L', grains: 136, bc: 0.568, v0: 825 },
-        { id: 'l94', caliber: '65x47lapua', maker: 'Hornady', bullet: 'ELD Match', grains: 140, bc: 0.610, v0: 815 },
-        { id: 'l95', caliber: '308norma', maker: 'Norma', bullet: 'Oryx', grains: 180, bc: 0.388, v0: 890 },
-        { id: 'l96', caliber: '85x63', maker: 'Skadi', bullet: 'Messing-Hohlspitz', grains: 168, bc: 0.380, v0: 885 },
-        { id: 'l97', caliber: '85x63', maker: 'Hornady', bullet: 'ELD-X', grains: 200, bc: 0.597, v0: 810 },
-        { id: 'l98', caliber: '416rigby', maker: 'Hornady', bullet: 'DGX Bonded', grains: 400, bc: 0.340, v0: 732 },
-        { id: 'l99', caliber: '308win', maker: 'Hornady', bullet: 'A-MAX', grains: 155, bc: 0.435, v0: 853 },
-        { id: 'l100', caliber: '65creed', maker: 'Norma', bullet: 'Golden Target', grains: 130, bc: 0.509, v0: 840 },
-        { id: 'l101', caliber: '300winmag', maker: 'Hornady', bullet: 'ELD-X', grains: 200, bc: 0.597, v0: 865 },
-        { id: 'l102', caliber: '223rem', maker: 'Lapua', bullet: 'Scenar', grains: 69, bc: 0.301, v0: 860 }
-    ];
+  function uid() {
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
 
-    // -------------------------------------------------------------------------
-    // 2. GEO-FALLBACK STÄDTELISTE (25 Städte: DE, AT, CH, USA)
-    // -------------------------------------------------------------------------
-    const CITIES_FALLBACK = [
-        { name: 'Berlin (DE)', lat: 52.5200 },
-        { name: 'München (DE)', lat: 48.1351 },
-        { name: 'Stuttgart / Filder (DE)', lat: 48.7000 },
-        { name: 'Hamburg (DE)', lat: 53.5511 },
-        { name: 'Köln (DE)', lat: 50.9375 },
-        { name: 'Frankfurt am Main (DE)', lat: 50.1109 },
-        { name: 'Leipzig (DE)', lat: 51.3397 },
-        { name: 'Wien (AT)', lat: 48.2082 },
-        { name: 'Graz (AT)', lat: 47.0707 },
-        { name: 'Innsbruck (AT)', lat: 47.2692 },
-        { name: 'Salzburg (AT)', lat: 47.8095 },
-        { name: 'Zürich (CH)', lat: 47.3769 },
-        { name: 'Bern (CH)', lat: 46.9480 },
-        { name: 'Genf (CH)', lat: 46.2044 },
-        { name: 'Basel (CH)', lat: 47.5596 },
-        { name: 'Denver, CO (USA)', lat: 39.7392 },
-        { name: 'Camp Perry, OH (USA)', lat: 41.5400 },
-        { name: 'Raton, NM (USA)', lat: 36.8995 },
-        { name: 'Phoenix, AZ (USA)', lat: 33.4484 },
-        { name: 'Seattle, WA (USA)', lat: 47.6062 },
-        { name: 'Anchorage, AK (USA)', lat: 61.2181 },
-        { name: 'Austin, TX (USA)', lat: 30.2672 },
-        { name: 'Salt Lake City, UT (USA)', lat: 40.7608 },
-        { name: 'Minneapolis, MN (USA)', lat: 44.9778 },
-        { name: 'Cheyenne, WY (USA)', lat: 41.1400 }
-    ];
-
-    // -------------------------------------------------------------------------
-    // 3. LEXIKON / INFO-EINTRÄGE (DE & EN)
-    // -------------------------------------------------------------------------
-    const LEXICON_ITEMS = [
-        {
-            id: 'bc',
-            title: { de: 'Ballistischer Koeffizient (BC)', en: 'Ballistic Coefficient (BC)' },
-            desc: {
-                de: 'Der ballistische Koeffizient beschreibt, wie gut ein Geschoss den Luftwiderstand im Vergleich zu einem Referenzgeschoss (G1 oder G7) überwindet. Ein höherer BC bedeutet geringeren Geschwindigkeitsverlust, flachere Flugbahn und weniger Winddrift. Er hängt von Geschossform, Masse und Querschnitt ab.',
-                en: 'The ballistic coefficient measures how effectively a projectile overcomes air resistance compared to a standard reference projectile (G1 or G7). A higher BC means less velocity loss, flatter trajectory, and reduced wind drift. It depends on bullet shape, mass, and cross-sectional area.'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/Ballistischer_Koeffizient',
-                en: 'https://en.wikipedia.org/wiki/Ballistic_coefficient'
+  /* --------------------------------------------------------------------------
+   * DB-Validierung und Zugriff (Basis-DB bleibt unverändert)
+   * ------------------------------------------------------------------------*/
+  function validateDatabases() {
+    var issues = [];
+    function isObj(x) { return x && typeof x === 'object' && !Array.isArray(x); }
+    if (!isObj(window.AMMO_DB_LONG)) issues.push('AMMO_DB_LONG');
+    if (!isObj(window.AMMO_DB_SHORT)) issues.push('AMMO_DB_SHORT');
+    if (!isObj(window.CALIBER_META_LONG)) issues.push('CALIBER_META_LONG');
+    if (!isObj(window.CALIBER_META_SHORT)) issues.push('CALIBER_META_SHORT');
+    if (typeof window.AMMO_DB_VERSION_LONG !== 'string') issues.push('AMMO_DB_VERSION_LONG');
+    if (typeof window.AMMO_DB_VERSION_SHORT !== 'string') issues.push('AMMO_DB_VERSION_SHORT');
+    if (issues.length === 0) {
+      // Stichprobenartige Schema-Prüfung: Kaliber -> Array von Einträgen mit n und ref.
+      [['long', window.AMMO_DB_LONG], ['short', window.AMMO_DB_SHORT]].forEach(function (pair) {
+        var db = pair[1];
+        Object.keys(db).forEach(function (cal) {
+          var arr = db[cal];
+          if (!Array.isArray(arr)) { issues.push(pair[0] + ':' + cal); return; }
+          arr.forEach(function (e) {
+            if (!e || typeof e.n !== 'string' || !e.ref || !Array.isArray(e.ref.distances)) {
+              issues.push(pair[0] + ':' + cal + ':ref');
             }
-        },
-        {
-            id: 'coriolis',
-            title: { de: 'Corioliskraft (horizontal)', en: 'Coriolis Effect (Horizontal)' },
-            desc: {
-                de: 'Durch die Erdrotation wird ein fliegendes Geschoss aus Sicht des Schützen horizontal abgelenkt. Auf der Nordhalbkugel weicht das Geschoss unabhängig von der Schussrichtung nach rechts ab. Der Effekt nimmt mit zunehmender Distanz, Flugzeit und Breitengrad zu.',
-                en: 'Earth’s rotation deflects a projectile horizontally relative to the shooter’s frame of reference. In the Northern Hemisphere, the bullet deflects to the right regardless of firing direction. The effect grows with distance, time of flight, and latitude.'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/Corioliskraft',
-                en: 'https://en.wikipedia.org/wiki/Coriolis_force'
-            }
-        },
-        {
-            id: 'eotvos',
-            title: { de: 'Eötvös-Effekt', en: 'Eötvös Effect' },
-            desc: {
-                de: 'Der Eötvös-Effekt ist die vertikale Komponente der Corioliskraft bei Bewegungen in Ost- oder Westrichtung. Bei einem Schuss nach Osten addiert sich die Geschossgeschwindigkeit zur Erdrotation und verringert die scheinbare Schwerkraft leicht (Treffpunkt höher). Nach Westen wirkt er umgekehrt (Treffpunkt tiefer).',
-                en: 'The Eötvös effect is the vertical component of the Coriolis force when firing east or west. Firing east adds to Earth’s rotational speed and slightly reduces apparent gravity (higher impact). Firing west has the opposite effect (lower impact).'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/E%C3%B6tv%C3%B6s-Effekt',
-                en: 'https://en.wikipedia.org/wiki/E%C3%B6tv%C3%B6s_effect'
-            }
-        },
-        {
-            id: 'spindrift',
-            title: { de: 'Spin Drift (Kreiseldrift)', en: 'Spin Drift' },
-            desc: {
-                de: 'Ein drallstabilisiertes Geschoss folgt seiner Flugbahn leicht nickend und wird durch die Kreiselpräzession seitlich abgelenkt. Bei Rechtsdrall driftet das Geschoss nach rechts, bei Linksdrall nach links. Besonders auf weite Distanzen mit langer Flugzeit wird Spin Drift relevant.',
-                en: 'A spin-stabilized bullet experiences slight yaw precession during flight, resulting in a lateral drift. Right-hand twist drifts right; left-hand twist drifts left. Spin drift becomes especially noticeable at longer ranges with longer flight times.'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/Pr%C3%A4zession',
-                en: 'https://en.wikipedia.org/wiki/External_ballistics'
-            }
-        },
-        {
-            id: 'density_altitude',
-            title: { de: 'Dichtehöhe (Density Altitude)', en: 'Density Altitude' },
-            desc: {
-                de: 'Die Dichtehöhe gibt an, in welcher Höhe der ICAO-Standardatmosphäre die aktuell gemessene Luftdichte herrscht. Hohe Temperaturen, niedriger Luftdruck und hohe Luftfeuchtigkeit senken die Luftdichte und erhöhen die Dichtehöhe. Dünnere Luft verringert den Luftwiderstand und lässt das Geschoss flacher fliegen.',
-                en: 'Density altitude is the altitude in the ISA standard atmosphere corresponding to the current air density. High temperature, low pressure, and high humidity decrease air density and increase density altitude. Less dense air reduces drag, flattening the trajectory.'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/Dichteh%C3%B6he',
-                en: 'https://en.wikipedia.org/wiki/Density_altitude'
-            }
-        },
-        {
-            id: 'zero_conditions',
-            title: { de: 'Zero-Bedingungen (Einschießbedingungen)', en: 'Zero Conditions' },
-            desc: {
-                de: 'Wird eine Waffe z. B. im Sommer bei 30 °C auf 100 m eingeschossen, gilt der ermittelte Abgangswinkel zunächst für diese Luftdichte. Ändert sich das Wetter später (z. B. Kälte im Winter), weicht der Treffpunkt auf Distanz ab. Die App berechnet den Abgangswinkel unter Zero-Wetter und simuliert den Flug mit aktuellem Wetter.',
-                en: 'If a rifle is zeroed at 100 m in summer at 30 °C, the firing angle matches that air density. When weather changes later (e.g., cold winter air), impact shifts at distance. The app solves firing angle under zero weather and simulates flight under current weather.'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/Visierlinie',
-                en: 'https://en.wikipedia.org/wiki/Sight_(firearm)'
-            }
-        },
-        {
-            id: 'wind',
-            title: { de: 'Wind & Querwind-Drift', en: 'Wind & Crosswind Drift' },
-            desc: {
-                de: 'Querwind versetzt das Geschoss seitlich, weil die Luftmasse relativ zur Flugbahn bewegt wird und das Geschoss durch Verzögerung länger in der Luft bleibt als im Vakuum. 0° bedeutet Wind von vorne, 90° von rechts, 180° von hinten und 270° von links. Mit zunehmender Distanz steigt die Winddrift überproportional an.',
-                en: 'Crosswind pushes the bullet laterally because the air mass moves relative to the flight path and aerodynamic drag increases time of flight over vacuum flight. 0° is headwind, 90° from right, 180° tailwind, and 270° from left. Wind drift grows nonlinearly with range.'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/Au%C3%9Fenballistik',
-                en: 'https://en.wikipedia.org/wiki/External_ballistics'
-            }
-        },
-        {
-            id: 'miller',
-            title: { de: 'Miller-Stabilitätsfaktor (Sg)', en: 'Miller Stability Factor (Sg)' },
-            desc: {
-                de: 'Der Miller-Faktor schätzt ab, ob die Drallrate des Laufs das Geschoss im Flug stabil hält. Werte unter 1,0 deuten auf Instabilität hin, 1,0–1,3 sind grenzwertig, 1,3–2,0 gelten als optimal und über 2,0 als überstabilisiert. Auch Luftdichte und Mündungsgeschwindigkeit beeinflussen den Wert.',
-                en: 'The Miller stability factor estimates whether barrel twist rate keeps a projectile gyroscopically stable in flight. Values below 1.0 suggest instability, 1.0–1.3 are marginal, 1.3–2.0 are optimal, and above 2.0 over-stabilized. Air density and muzzle velocity also play a role.'
-            },
-            wiki: {
-                de: 'https://de.wikipedia.org/wiki/Drall',
-                en: 'https://en.wikipedia.org/wiki/Rifling'
-            }
-        }
-    ];
-
-    // -------------------------------------------------------------------------
-    // 4. ÜBERSETZUNGEN (i18n DE / EN)
-    // -------------------------------------------------------------------------
-    const I18N = {
-        de: {
-            appTitle: 'Ballistik & Schießbuch PWA v0.1',
-            disclaimerBanner: 'Nur für Sportschützen. Werte immer mit realen Schussdaten verifizieren.',
-            privacyFooter: 'Datenschutz: Standort wird nur für den Wetter-Abruf verwendet und nicht gespeichert. Alle anderen Daten bleiben lokal im Browser.',
-            tabCalc: 'Ballistik-Rechner',
-            tabWeapons: 'Waffen & Munition',
-            tabLog: 'Schießtagebuch',
-            tabLexicon: 'Lexikon',
-            caliber: 'Kaliber',
-            loadSelect: 'Laborierung (Hersteller / Geschoss)',
-            allCalibers: 'Alle Kaliber',
-            searchLoad: 'Suche (Hersteller / Geschoss)...',
-            bulletWeight: 'Geschossgewicht (gr)',
-            dragModel: 'Widerstandsmodell',
-            bcValue: 'Ballistischer Koeffizient (BC)',
-            v0Label: 'Mündungsgeschwindigkeit V0',
-            v0Note: 'Herstellerangaben ca. 24" Lauflänge – ggf. an eigene Waffe anpassen.',
-            sightHeight: 'Visierhöhe (Pflicht)',
-            zeroDist: 'Einschießdistanz (Zero)',
-            maxDist: 'Maximaldistanz',
-            stepDist: 'Schrittweite',
-            shotAngle: 'Schusswinkel (°, + bergauf)',
-            windSpeed: 'Windgeschwindigkeit',
-            windDir: 'Windrichtung (°)',
-            windDirHint: '0° vorne · 90° rechts · 180° hinten · 270° links',
-            clickUnit: 'Klickwert',
-            weatherSection: 'Wetter & Atmosphäre',
-            tempLabel: 'Temperatur',
-            pressureLabel: 'Luftdruck (hPa)',
-            humidityLabel: 'Luftfeuchtigkeit (%)',
-            fetchWeatherBtn: 'Wetter via GPS laden',
-            geoFallbackLabel: 'Geo-Fallback (Breitengrad)',
-            latitudeLabel: 'Breitengrad (°)',
-            azimuthLabel: 'Azimut / Schussrichtung (°)',
-            zeroWeatherSection: 'Zero-Bedingungen',
-            sameWeatherAsCurrent: 'Gleiches Wetter wie aktuell',
-            zeroTempLabel: 'Zero-Temperatur',
-            zeroPressureLabel: 'Zero-Luftdruck (hPa)',
-            zeroHumidityLabel: 'Zero-Feuchte (%)',
-            sensorSection: 'Smartphone-Sensoren (Winkel & Azimut)',
-            sensorBtn: 'Sensor-Snapshot (5 Messungen / 2s)',
-            sensorIdle: 'Bereit für 5 Messungen in 2 Sekunden.',
-            sensorMeasuring: 'Messe Lagesensoren (2s)...',
-            sensorNoApi: 'Lagesensoren oder Kompass nicht verfügbar. Bitte Winkel und Azimut manuell eingeben.',
-            sensorDenied: 'Sensor-Berechtigung verweigert. Bitte Werte manuell eingeben.',
-            sensorSpread: 'Streuung',
-            sensorGreen: 'Ruhig / Plausibel',
-            sensorYellow: 'Leichtes Zittern',
-            sensorRed: 'Ausreißer / Unplausibel',
-            compareToggle: '2. Munition vergleichen',
-            compareTitle: 'Vergleichs-Munition (Munition B)',
-            e0Label: 'Mündungsenergie (E0)',
-            densityAltLabel: 'Dichtehöhe (DA)',
-            airDensityLabel: 'Luftdichte',
-            transonicLabel: 'Transsonik (Mach 1)',
-            transonicNone: 'Nicht erreicht',
-            tableDist: 'Distanz',
-            tableDrop: 'Drop',
-            tableMil: 'MIL',
-            tableClicks: 'Klicks',
-            tableVel: 'Geschw. (v)',
-            tableEnergy: 'Energie',
-            tableTof: 'Flugzeit',
-            tableCoriolis: 'Coriolis',
-            tableSpin: 'Spin Drift',
-            tableWind: 'Winddrift',
-            tableDiff: 'Diff. Drop (A-B)',
-            graphTitle: 'Flugbahn relativ zur Visierlinie (Nulllinie)',
-            graphSightLine: 'Visierlinie (0)',
-            graphTransonic: 'Transsonik',
-            graphBulletA: 'Munition A',
-            graphBulletB: 'Munition B',
-            toLogBtn: 'Ins Logbuch',
-            weaponFormTitle: 'Waffenprofil anlegen',
-            weaponName: 'Waffenname',
-            weaponCaliber: 'Kaliber',
-            barrelLen: 'Lauflänge (Zoll, nur Doku)',
-            twistRate: 'Dralllänge / Twist (Zoll)',
-            twistDir: 'Drallrichtung',
-            twistRight: 'Rechtsdrall',
-            twistLeft: 'Linksdrall',
-            saveWeaponBtn: 'Waffe speichern',
-            savedWeaponsTitle: 'Gespeicherte Waffen',
-            activeWeapon: 'Aktiv',
-            useWeaponBtn: 'Auswählen',
-            deleteBtn: 'Löschen',
-            customLoadTitle: 'Eigene Laborierung anlegen',
-            customLoadName: 'Bezeichnung (Hersteller + Geschoss)',
-            saveCustomLoadBtn: 'Laborierung speichern',
-            millerTitle: 'Miller-Stabilitäts-Check',
-            millerSg: 'Stabilitätsfaktor Sg',
-            millerLenCal: 'Geschosslänge (Kaliber)',
-            millerUnstable: 'Instabil (< 1,0)',
-            millerMarginal: 'Grenzwertig (1,0 – 1,3)',
-            millerOptimal: 'Optimal (1,3 – 2,0)',
-            millerOver: 'Überstabilisiert (> 2,0)',
-            backupTitle: 'Datensicherung (JSON Export / Import)',
-            exportJsonBtn: 'JSON Export',
-            importJsonBtn: 'JSON Import',
-            logTitle: 'Schießtagebuch',
-            logDate: 'Datum',
-            logWeapon: 'Waffe',
-            logDistance: 'Distanz',
-            logGroup: 'Streukreis (mm, optional)',
-            logWeather: 'Wetter kurz (optional)',
-            logNotes: 'Ergebnis / Notiz',
-            saveLogBtn: 'Eintrag speichern',
-            openWiki: 'Wikipedia öffnen',
-            closeModal: 'Schließen',
-            weatherError: 'Wetterabruf fehlgeschlagen (GPS abgelehnt oder kein Netz). Bitte manuell eingeben.',
-            weatherSuccess: 'Aktuelle Wetterdaten von Open-Meteo übernommen.',
-            savedMsg: 'Gespeichert.',
-            importedMsg: 'Backup erfolgreich importiert.',
-            importError: 'Ungültige JSON-Backup-Datei.',
-            logAddedMsg: 'Eintrag ins Schießtagebuch übernommen.'
-        },
-        en: {
-            appTitle: 'Ballistics & Range Logbook PWA v0.1',
-            disclaimerBanner: 'For sport shooters only. Always verify values with real-world shot data.',
-            privacyFooter: 'Privacy: Location is used solely for weather lookup and is never stored. All other data stays locally in your browser.',
-            tabCalc: 'Ballistics Calculator',
-            tabWeapons: 'Weapons & Ammo',
-            tabLog: 'Range Logbook',
-            tabLexicon: 'Lexicon',
-            caliber: 'Caliber',
-            loadSelect: 'Load (Maker / Bullet)',
-            allCalibers: 'All Calibers',
-            searchLoad: 'Search (maker / bullet)...',
-            bulletWeight: 'Bullet Weight (gr)',
-            dragModel: 'Drag Model',
-            bcValue: 'Ballistic Coefficient (BC)',
-            v0Label: 'Muzzle Velocity V0',
-            v0Note: 'Factory data ~24" barrel – adjust manually for your rifle.',
-            sightHeight: 'Sight Height (Required)',
-            zeroDist: 'Zero Distance',
-            maxDist: 'Max Distance',
-            stepDist: 'Step Interval',
-            shotAngle: 'Shot Angle (°, + uphill)',
-            windSpeed: 'Wind Speed',
-            windDir: 'Wind Direction (°)',
-            windDirHint: '0° headwind · 90° from right · 180° tailwind · 270° from left',
-            clickUnit: 'Click Value',
-            weatherSection: 'Weather & Atmosphere',
-            tempLabel: 'Temperature',
-            pressureLabel: 'Pressure (hPa)',
-            humidityLabel: 'Humidity (%)',
-            fetchWeatherBtn: 'Fetch Weather via GPS',
-            geoFallbackLabel: 'Geo Fallback (Latitude)',
-            latitudeLabel: 'Latitude (°)',
-            azimuthLabel: 'Azimuth / Firing Heading (°)',
-            zeroWeatherSection: 'Zero Conditions',
-            sameWeatherAsCurrent: 'Same weather as current',
-            zeroTempLabel: 'Zero Temperature',
-            zeroPressureLabel: 'Zero Pressure (hPa)',
-            zeroHumidityLabel: 'Zero Humidity (%)',
-            sensorSection: 'Smartphone Sensors (Angle & Azimuth)',
-            sensorBtn: 'Sensor Snapshot (5 reads / 2s)',
-            sensorIdle: 'Ready for 5 measurements in 2 seconds.',
-            sensorMeasuring: 'Reading orientation sensors (2s)...',
-            sensorNoApi: 'Orientation/compass sensors unavailable. Enter angle and azimuth manually.',
-            sensorDenied: 'Sensor permission denied. Enter values manually.',
-            sensorSpread: 'Spread',
-            sensorGreen: 'Steady / Plausible',
-            sensorYellow: 'Slight Tremor',
-            sensorRed: 'Outlier / Unplausible',
-            compareToggle: 'Compare 2nd Ammo',
-            compareTitle: 'Comparison Load (Ammo B)',
-            e0Label: 'Muzzle Energy (E0)',
-            densityAltLabel: 'Density Altitude (DA)',
-            airDensityLabel: 'Air Density',
-            transonicLabel: 'Transonic (Mach 1)',
-            transonicNone: 'Not reached',
-            tableDist: 'Range',
-            tableDrop: 'Drop',
-            tableMil: 'MIL',
-            tableClicks: 'Clicks',
-            tableVel: 'Vel. (v)',
-            tableEnergy: 'Energy',
-            tableTof: 'TOF',
-            tableCoriolis: 'Coriolis',
-            tableSpin: 'Spin Drift',
-            tableWind: 'Wind Drift',
-            tableDiff: 'Diff. Drop (A-B)',
-            graphTitle: 'Trajectory Relative to Sight Line (Zero Line)',
-            graphSightLine: 'Sight Line (0)',
-            graphTransonic: 'Transonic',
-            graphBulletA: 'Ammo A',
-            graphBulletB: 'Ammo B',
-            toLogBtn: 'Send to Logbook',
-            weaponFormTitle: 'Add Weapon Profile',
-            weaponName: 'Weapon Name',
-            weaponCaliber: 'Caliber',
-            barrelLen: 'Barrel Length (in, doc only)',
-            twistRate: 'Twist Rate (in)',
-            twistDir: 'Twist Direction',
-            twistRight: 'Right Twist',
-            twistLeft: 'Left Twist',
-            saveWeaponBtn: 'Save Weapon',
-            savedWeaponsTitle: 'Saved Weapons',
-            activeWeapon: 'Active',
-            useWeaponBtn: 'Select',
-            deleteBtn: 'Delete',
-            customLoadTitle: 'Create Custom Load',
-            customLoadName: 'Name (Maker + Bullet)',
-            saveCustomLoadBtn: 'Save Load',
-            millerTitle: 'Miller Stability Check',
-            millerSg: 'Stability Factor Sg',
-            millerLenCal: 'Bullet Length (Calibers)',
-            millerUnstable: 'Unstable (< 1.0)',
-            millerMarginal: 'Marginal (1.0 – 1.3)',
-            millerOptimal: 'Optimal (1.3 – 2.0)',
-            millerOver: 'Over-stabilized (> 2.0)',
-            backupTitle: 'Backup (JSON Export / Import)',
-            exportJsonBtn: 'JSON Export',
-            importJsonBtn: 'JSON Import',
-            logTitle: 'Range Logbook',
-            logDate: 'Date',
-            logWeapon: 'Weapon',
-            logDistance: 'Range',
-            logGroup: 'Group Size (mm, optional)',
-            logWeather: 'Weather Notes (optional)',
-            logNotes: 'Result / Notes',
-            saveLogBtn: 'Save Entry',
-            openWiki: 'Open Wikipedia',
-            closeModal: 'Close',
-            weatherError: 'Weather fetch failed (GPS denied or offline). Please enter manually.',
-            weatherSuccess: 'Current weather loaded from Open-Meteo.',
-            savedMsg: 'Saved.',
-            importedMsg: 'Backup imported successfully.',
-            importError: 'Invalid JSON backup file.',
-            logAddedMsg: 'Added entry to range logbook.'
-        }
-    };
-
-    // -------------------------------------------------------------------------
-    // 5. STANDARD-STATE & DATEN-MIGRATION
-    // -------------------------------------------------------------------------
-    function getDefaultState() {
-        return {
-            version: APP_VERSION,
-            lang: 'de',
-            units: 'metric',
-            activeTab: 'calc',
-            activeWeaponId: 'w_default_308',
-            weapons: [
-                {
-                    id: 'w_default_308',
-                    name: 'Match-Repetierer .308 Win',
-                    caliberId: '308win',
-                    barrelLengthIn: 24,
-                    twistRateIn: 10,
-                    twistDirection: 'right',
-                    sightHeightCm: 5.0
-                }
-            ],
-            customLoads: [],
-            logbook: [
-                {
-                    id: 'log_1',
-                    date: new Date().toISOString().slice(0, 10),
-                    weaponId: 'w_default_308',
-                    weaponName: 'Match-Repetierer .308 Win',
-                    caliberName: '.308 Win / 7.62x51',
-                    loadName: 'Hornady 168gr ELD-M',
-                    distanceM: 300,
-                    groupSizeMm: 24,
-                    weatherShort: '15°C, 1013 hPa, Wind 0',
-                    notes: 'Erste Probeladung auf 300 m, ruhige Bedingungen.'
-                }
-            ],
-            calc: {
-                caliberFilter: '308win',
-                loadId: 'l48',
-                loadSearch: '',
-                bulletWeightGrains: 168,
-                bc: 0.520,
-                dragModel: 'G1',
-                v0Ms: 810,
-                sightHeightCm: 5.0,
-                zeroDistanceM: 100,
-                maxDistanceM: 600,
-                stepDistanceM: 50,
-                shotAngleDeg: 0,
-                windSpeedMs: 0,
-                windDirectionDeg: 0,
-                clickUnit: 'MIL',
-                tempC: 15.0,
-                pressureHpa: 1013.0,
-                humidityPercent: 50.0,
-                latitudeDeg: 48.7,
-                azimuthDeg: 0,
-                sameWeatherAsCurrent: true,
-                zeroTempC: 15.0,
-                zeroPressureHpa: 1013.0,
-                zeroHumidityPercent: 50.0,
-                compareEnabled: false,
-                compareCaliberId: '65creed',
-                compareLoadId: 'l25',
-                compareV0Ms: 820,
-                compareBc: 0.610,
-                compareGrains: 140
-            },
-            logDraft: {
-                date: new Date().toISOString().slice(0, 10),
-                weaponId: 'w_default_308',
-                caliberName: '.308 Win / 7.62x51',
-                loadName: 'Hornady 168gr ELD-M',
-                distanceM: 100,
-                groupSizeMm: '',
-                weatherShort: '',
-                notes: ''
-            }
-        };
-    }
-
-    function migrateAndLoadState() {
-        const defaults = getDefaultState();
-        let raw = localStorage.getItem(STORAGE_KEY);
-
-        if (!raw) {
-            for (const oldKey of LEGACY_KEYS) {
-                const oldVal = localStorage.getItem(oldKey);
-                if (oldVal) {
-                    raw = oldVal;
-                    break;
-                }
-            }
-        }
-
-        if (!raw) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(defaults));
-            return defaults;
-        }
-
-        try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                return { ...defaults, weapons: parsed };
-            }
-
-            const merged = {
-                ...defaults,
-                ...parsed,
-                version: APP_VERSION,
-                lang: parsed.lang === 'en' ? 'en' : 'de',
-                units: parsed.units === 'imperial' ? 'imperial' : 'metric',
-                weapons: Array.isArray(parsed.weapons) && parsed.weapons.length > 0 ? parsed.weapons : defaults.weapons,
-                customLoads: Array.isArray(parsed.customLoads) ? parsed.customLoads : [],
-                logbook: Array.isArray(parsed.logbook) ? parsed.logbook : defaults.logbook,
-                calc: { ...defaults.calc, ...(parsed.calc || {}) },
-                logDraft: { ...defaults.logDraft, ...(parsed.logDraft || {}) }
-            };
-
-            if (!isFinite(parseFloat(merged.calc.sightHeightCm)) || parseFloat(merged.calc.sightHeightCm) <= 0) {
-                merged.calc.sightHeightCm = 5.0;
-            }
-
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-            return merged;
-        } catch (err) {
-            console.warn('State-Migration Fehler, nutze Standardwerte:', err);
-            return defaults;
-        }
-    }
-
-    let state = migrateAndLoadState();
-    let statusBannerMsg = '';
-    let statusBannerType = 'info';
-    let activeModalLexiconId = null;
-
-    // Sensor-Snapshot Status
-    let sensorState = {
-        status: 'idle', // 'idle' | 'measuring' | 'done' | 'error'
-        message: '',
-        trafficLight: null, // 'green' | 'yellow' | 'red'
-        spreadDeg: 0,
-        meanAngleDeg: 0,
-        meanAzimuthDeg: 0
-    };
-
-    function saveState() {
-        try {
-            state.version = APP_VERSION;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        } catch (err) {
-            console.error('Fehler beim Speichern in LocalStorage:', err);
-        }
-    }
-
-    function t(key) {
-        const langDict = I18N[state.lang] || I18N.de;
-        return langDict[key] || I18N.de[key] || key;
-    }
-
-    function setNotice(msg, type = 'info') {
-        statusBannerMsg = msg;
-        statusBannerType = type;
-        render();
-    }
-
-    function escapeHtml(str) {
-        return String(str ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
-    // -------------------------------------------------------------------------
-    // 6. EINHEITEN-FORMATIERUNG (Intern metrisch -> Anzeige Metrisch / Imperial)
-    // -------------------------------------------------------------------------
-    function isImp() {
-        return state.units === 'imperial';
-    }
-
-    function fmtDistInput(meters) {
-        const m = parseFloat(meters) || 0;
-        return isImp() ? (m * 1.0936133).toFixed(0) : m.toFixed(0);
-    }
-
-    function parseDistInput(val) {
-        const n = parseFloat(val);
-        if (!isFinite(n)) return 0;
-        return isImp() ? n / 1.0936133 : n;
-    }
-
-    function fmtSightInput(cm) {
-        const c = isFinite(parseFloat(cm)) ? parseFloat(cm) : 5.0;
-        return isImp() ? (c / 2.54).toFixed(2) : c.toFixed(1);
-    }
-
-    function parseSightInput(val) {
-        const n = parseFloat(val);
-        if (!isFinite(n) || n <= 0) return 5.0;
-        return isImp() ? n * 2.54 : n;
-    }
-
-    function fmtVelInput(ms) {
-        const v = parseFloat(ms) || 0;
-        return isImp() ? (v * 3.2808399).toFixed(0) : v.toFixed(0);
-    }
-
-    function parseVelInput(val) {
-        const n = parseFloat(val);
-        if (!isFinite(n)) return 0;
-        return isImp() ? n / 3.2808399 : n;
-    }
-
-    function fmtTempInput(c) {
-        const temp = isFinite(parseFloat(c)) ? parseFloat(c) : 15;
-        return isImp() ? ((temp * 9) / 5 + 32).toFixed(1) : temp.toFixed(1);
-    }
-
-    function parseTempInput(val) {
-        const n = parseFloat(val);
-        if (!isFinite(n)) return 15;
-        return isImp() ? ((n - 32) * 5) / 9 : n;
-    }
-
-    function fmtWindInput(ms) {
-        const w = parseFloat(ms) || 0;
-        return isImp() ? (w / 0.44704).toFixed(1) : w.toFixed(1);
-    }
-
-    function parseWindInput(val) {
-        const n = parseFloat(val);
-        if (!isFinite(n)) return 0;
-        return isImp() ? n * 0.44704 : n;
-    }
-
-    function fmtDropDisplay(cm) {
-        const v = isFinite(cm) ? cm : 0;
-        return isImp() ? `${(v / 2.54).toFixed(1)} in` : `${v.toFixed(1)} cm`;
-    }
-
-    function fmtEnergyDisplay(joules) {
-        const j = isFinite(joules) ? joules : 0;
-        return isImp() ? `${(j * 0.7375621).toFixed(0)} ft-lb` : `${j.toFixed(0)} J`;
-    }
-
-    function fmtAltitudeDisplay(meters) {
-        const m = isFinite(meters) ? meters : 0;
-        return isImp() ? `${(m * 3.2808399).toFixed(0)} ft` : `${m.toFixed(0)} m`;
-    }
-
-    function distUnitLabel() {
-        return isImp() ? 'yd' : 'm';
-    }
-
-    // -------------------------------------------------------------------------
-    // 7. WETTER-API (Open-Meteo, niemals gecacht, kein Speichern von GPS)
-    // -------------------------------------------------------------------------
-    async function fetchWeatherByGps() {
-        if (!navigator.geolocation) {
-            setNotice(t('weatherError'), 'error');
-            return;
-        }
-
-        setNotice(state.lang === 'de' ? 'Ermittle GPS-Standort...' : 'Locating via GPS...', 'info');
-
-        navigator.geolocation.getCurrentPosition(
-            async (pos) => {
-                const lat = pos.coords.latitude;
-                const lon = pos.coords.longitude;
-                // Breitengrad einmalig für Coriolis übernehmen, GPS-Koordinaten nicht dauerhaft speichern
-                state.calc.latitudeDeg = Number(lat.toFixed(4));
-
-                try {
-                    const url = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}&current=temperature_2m,relative_humidity_2m,surface_pressure`;
-                    const resp = await fetch(url, { cache: 'no-store' });
-                    if (!resp.ok) throw new Error('Weather HTTP error');
-                    const data = await resp.json();
-                    const curr = data.current || {};
-
-                    if (isFinite(curr.temperature_2m)) state.calc.tempC = curr.temperature_2m;
-                    if (isFinite(curr.surface_pressure)) state.calc.pressureHpa = curr.surface_pressure;
-                    if (isFinite(curr.relative_humidity_2m)) state.calc.humidityPercent = curr.relative_humidity_2m;
-
-                    saveState();
-                    setNotice(t('weatherSuccess'), 'success');
-                } catch (err) {
-                    setNotice(t('weatherError'), 'error');
-                }
-            },
-            () => {
-                setNotice(t('weatherError'), 'error');
-            },
-            { enableHighAccuracy: false, timeout: 8000, maximumAge: 0 }
-        );
-    }
-
-    // -------------------------------------------------------------------------
-    // 8. SMARTPHONE-SENSOREN (DeviceOrientationEvent, 5 Messungen in 2s)
-    // -------------------------------------------------------------------------
-    async function startSensorSnapshot() {
-        if (typeof window.DeviceOrientationEvent === 'undefined') {
-            sensorState = { status: 'error', message: t('sensorNoApi'), trafficLight: null, spreadDeg: 0 };
-            render();
-            return;
-        }
-
-        // iOS 13+ Berechtigungsabfrage
-        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-            try {
-                const perm = await DeviceOrientationEvent.requestPermission();
-                if (perm !== 'granted') {
-                    sensorState = { status: 'error', message: t('sensorDenied'), trafficLight: null, spreadDeg: 0 };
-                    render();
-                    return;
-                }
-            } catch (err) {
-                sensorState = { status: 'error', message: t('sensorDenied'), trafficLight: null, spreadDeg: 0 };
-                render();
-                return;
-            }
-        }
-
-        sensorState = { status: 'measuring', message: t('sensorMeasuring'), trafficLight: null, spreadDeg: 0 };
-        render();
-
-        let latestAlpha = null;
-        let latestBeta = null;
-
-        const handler = (ev) => {
-            // iOS liefert webkitCompassHeading (0 = Nord, im Uhrzeigersinn)
-            if (typeof ev.webkitCompassHeading === 'number' && isFinite(ev.webkitCompassHeading)) {
-                latestAlpha = ev.webkitCompassHeading;
-            } else if (typeof ev.alpha === 'number' && isFinite(ev.alpha)) {
-                latestAlpha = (360 - ev.alpha) % 360;
-            }
-            if (typeof ev.beta === 'number' && isFinite(ev.beta)) {
-                latestBeta = ev.beta;
-            }
-        };
-
-        window.addEventListener('deviceorientation', handler, true);
-
-        const azimuthSamples = [];
-        const angleSamples = [];
-        let count = 0;
-
-        // 5 Messungen über 2 Sekunden (alle 400 ms)
-        const timer = setInterval(() => {
-            count++;
-            if (latestAlpha !== null) azimuthSamples.push(latestAlpha);
-            if (latestBeta !== null) {
-                // Schusswinkel: 0° waagerecht (Handy hochkant/flach je nach Haltung begrenzt auf -60..+60°)
-                const clampedPitch = Math.max(-60, Math.min(60, latestBeta - 90));
-                angleSamples.push(clampedPitch);
-            }
-
-            if (count >= 5) {
-                clearInterval(timer);
-                window.removeEventListener('deviceorientation', handler, true);
-
-                if (azimuthSamples.length === 0 && angleSamples.length === 0) {
-                    sensorState = { status: 'error', message: t('sensorNoApi'), trafficLight: null, spreadDeg: 0 };
-                    render();
-                    return;
-                }
-
-                const azStats = BallisticsEngine.calculateCircularStats(
-                    azimuthSamples.length > 0 ? azimuthSamples : [state.calc.azimuthDeg]
-                );
-
-                // Streuung des Neigungswinkels ebenfalls berücksichtigen
-                let angleMean = state.calc.shotAngleDeg;
-                let angleSpread = 0;
-                if (angleSamples.length > 0) {
-                    angleMean = angleSamples.reduce((a, b) => a + b, 0) / angleSamples.length;
-                    angleSpread = Math.max(...angleSamples) - Math.min(...angleSamples);
-                }
-
-                const totalSpread = Math.max(azStats.spreadDeg, angleSpread);
-                let light = 'green';
-                if (totalSpread >= 8.0) light = 'red';
-                else if (totalSpread >= 3.0) light = 'yellow';
-
-                state.calc.azimuthDeg = Number(azStats.meanDeg.toFixed(1));
-                state.calc.shotAngleDeg = Number(angleMean.toFixed(1));
-
-                sensorState = {
-                    status: 'done',
-                    trafficLight: light,
-                    spreadDeg: totalSpread,
-                    meanAngleDeg: state.calc.shotAngleDeg,
-                    meanAzimuthDeg: state.calc.azimuthDeg,
-                    message: light === 'green' ? t('sensorGreen') : (light === 'yellow' ? t('sensorYellow') : t('sensorRed'))
-                };
-
-                saveState();
-                render();
-            }
-        }, 400);
-    }
-
-    // -------------------------------------------------------------------------
-    // 9. HILFSFUNKTIONEN FÜR MUNITION, WAFFEN, LOGBUCH & BACKUP
-    // -------------------------------------------------------------------------
-    function getAllLoads() {
-        return [...state.customLoads, ...FACTORY_LOADS];
-    }
-
-    function getActiveWeapon() {
-        return state.weapons.find(w => w.id === state.activeWeaponId) || state.weapons[0];
-    }
-
-    function getCaliberById(id) {
-        return CALIBERS.find(c => c.id === id) || CALIBERS.find(c => c.id === '308win');
-    }
-
-    function applyLoadToCalc(loadId, isComparison = false) {
-        const load = getAllLoads().find(l => l.id === loadId);
-        if (!load) return;
-        if (isComparison) {
-            state.calc.compareLoadId = load.id;
-            state.calc.compareCaliberId = load.caliber;
-            state.calc.compareGrains = load.grains;
-            state.calc.compareBc = load.bc;
-            state.calc.compareV0Ms = load.v0;
-        } else {
-            state.calc.loadId = load.id;
-            state.calc.caliberFilter = load.caliber;
-            state.calc.bulletWeightGrains = load.grains;
-            state.calc.bc = load.bc;
-            state.calc.v0Ms = load.v0;
-        }
-        saveState();
-        render();
-    }
-
-    function selectWeapon(weaponId) {
-        const w = state.weapons.find(item => item.id === weaponId);
-        if (!w) return;
-        state.activeWeaponId = w.id;
-        state.calc.caliberFilter = w.caliberId;
-        state.calc.sightHeightCm = isFinite(parseFloat(w.sightHeightCm)) && w.sightHeightCm > 0 ? parseFloat(w.sightHeightCm) : 5.0;
-
-        // Passende erste Laborierung des Kalibers wählen
-        const firstLoad = getAllLoads().find(l => l.caliber === w.caliberId);
-        if (firstLoad) {
-            state.calc.loadId = firstLoad.id;
-            state.calc.bulletWeightGrains = firstLoad.grains;
-            state.calc.bc = firstLoad.bc;
-            state.calc.v0Ms = firstLoad.v0;
-        }
-        saveState();
-        setNotice(`${t('activeWeapon')}: ${w.name}`, 'success');
-    }
-
-    function sendCurrentCalcToLogbook() {
-        const weapon = getActiveWeapon();
-        const cal = getCaliberById(state.calc.caliberFilter);
-        const load = getAllLoads().find(l => l.id === state.calc.loadId);
-        const loadLabel = load ? `${load.maker} ${load.bullet}` : `${state.calc.bulletWeightGrains}gr (BC ${state.calc.bc})`;
-
-        state.logDraft = {
-            date: new Date().toISOString().slice(0, 10),
-            weaponId: weapon ? weapon.id : '',
-            caliberName: cal ? cal.name : state.calc.caliberFilter,
-            loadName: loadLabel,
-            distanceM: Math.round(state.calc.maxDistanceM),
-            groupSizeMm: '',
-            weatherShort: `${state.calc.tempC}°C, ${state.calc.pressureHpa} hPa, Wind ${state.calc.windSpeedMs} m/s (${state.calc.windDirectionDeg}°)`,
-            notes: `Zero: ${state.calc.zeroDistanceM}m, V0: ${state.calc.v0Ms} m/s, BC: ${state.calc.bc} (${state.calc.dragModel})`
-        };
-        state.activeTab = 'log';
-        saveState();
-        setNotice(t('logAddedMsg'), 'info');
-    }
-
-    function exportBackupJson() {
-        const payload = {
-            version: APP_VERSION,
-            exported: new Date().toISOString(),
-            weapons: state.weapons,
-            customLoads: state.customLoads,
-            logbook: state.logbook,
-            calc: state.calc
-        };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `ballistik-backup-v${APP_VERSION}-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-
-    function importBackupJson(file) {
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const parsed = JSON.parse(e.target.result);
-                if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.weapons)) {
-                    setNotice(t('importError'), 'error');
-                    return;
-                }
-                state.weapons = parsed.weapons.length > 0 ? parsed.weapons : state.weapons;
-                if (Array.isArray(parsed.customLoads)) state.customLoads = parsed.customLoads;
-                if (Array.isArray(parsed.logbook)) state.logbook = parsed.logbook;
-                if (parsed.calc && typeof parsed.calc === 'object') {
-                    state.calc = { ...state.calc, ...parsed.calc };
-                }
-                saveState();
-                setNotice(t('importedMsg'), 'success');
-            } catch (err) {
-                setNotice(t('importError'), 'error');
-            }
-        };
-        reader.readAsText(file);
-    }
-
-    // -------------------------------------------------------------------------
-    // 10. DYNAMISCHER SVG-FLUGBAHNGRAPH
-    // -------------------------------------------------------------------------
-    function renderTrajectorySvg(resultA, resultB) {
-        const ptsA = resultA.graphPoints || [];
-        if (ptsA.length < 2) return '';
-
-        const ptsB = resultB ? (resultB.graphPoints || []) : [];
-        const width = 760;
-        const height = 310;
-        const padLeft = 58;
-        const padRight = 24;
-        const padTop = 26;
-        const padBottom = 42;
-        const plotW = width - padLeft - padRight;
-        const plotH = height - padTop - padBottom;
-
-        const maxDist = Math.max(50, state.calc.maxDistanceM);
-
-        // Y-Werte (Drop in cm) sammeln, inkl. 0 (Visierlinie)
-        const allDrops = [0, ...ptsA.map(p => p.dropCm), ...ptsB.map(p => p.dropCm)];
-        let minY = Math.min(...allDrops);
-        let maxY = Math.max(...allDrops);
-        if (maxY - minY < 10) {
-            maxY += 5;
-            minY -= 5;
-        }
-        const yMargin = (maxY - minY) * 0.1;
-        minY -= yMargin;
-        maxY += yMargin;
-
-        const xToSvg = (distM) => padLeft + (distM / maxDist) * plotW;
-        const yToSvg = (dropCm) => padTop + ((maxY - dropCm) / (maxY - minY)) * plotH;
-
-        // Gitterlinien X (5 Schritte)
-        let gridHtml = '';
-        const xSteps = 5;
-        for (let i = 0; i <= xSteps; i++) {
-            const d = (maxDist / xSteps) * i;
-            const x = xToSvg(d);
-            const labelVal = isImp() ? Math.round(d * 1.0936133) : Math.round(d);
-            gridHtml += `<line x1="${x.toFixed(1)}" y1="${padTop}" x2="${x.toFixed(1)}" y2="${height - padBottom}" class="svg-grid" />`;
-            gridHtml += `<text x="${x.toFixed(1)}" y="${height - 14}" text-anchor="middle" class="svg-axis-label">${labelVal} ${distUnitLabel()}</text>`;
-        }
-
-        // Gitterlinien Y (5 Schritte)
-        const ySteps = 5;
-        for (let i = 0; i <= ySteps; i++) {
-            const valCm = minY + ((maxY - minY) / ySteps) * i;
-            const y = yToSvg(valCm);
-            const labelVal = isImp() ? (valCm / 2.54).toFixed(1) : valCm.toFixed(0);
-            gridHtml += `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${width - padRight}" y2="${y.toFixed(1)}" class="svg-grid" />`;
-            gridHtml += `<text x="${padLeft - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="svg-axis-label">${labelVal}</text>`;
-        }
-
-        // Visierlinie (y = 0)
-        const zeroLineY = yToSvg(0);
-        const sightLineHtml = `
-            <line x1="${padLeft}" y1="${zeroLineY.toFixed(1)}" x2="${width - padRight}" y2="${zeroLineY.toFixed(1)}" class="svg-sight-line" />
-            <text x="${padLeft + 6}" y="${(zeroLineY - 6).toFixed(1)}" class="svg-sight-label">${escapeHtml(t('graphSightLine'))}</text>
-        `;
-
-        // Transsonik-Markierung (falls innerhalb Maximaldistanz)
-        let transonicHtml = '';
-        if (resultA.transonicDistance && resultA.transonicDistance <= maxDist) {
-            const tx = xToSvg(resultA.transonicDistance);
-            const tDistDisp = isImp() ? `${Math.round(resultA.transonicDistance * 1.0936133)} yd` : `${resultA.transonicDistance} m`;
-            transonicHtml = `
-                <line x1="${tx.toFixed(1)}" y1="${padTop}" x2="${tx.toFixed(1)}" y2="${height - padBottom}" class="svg-transonic-line" />
-                <text x="${(tx + 5).toFixed(1)}" y="${padTop + 14}" class="svg-transonic-label">${escapeHtml(t('graphTransonic'))} (${tDistDisp})</text>
-            `;
-        }
-
-        // Kurve A
-        const pathA = ptsA
-            .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${xToSvg(p.distance).toFixed(1)} ${yToSvg(p.dropCm).toFixed(1)}`)
-            .join(' ');
-
-        // Kurve B (falls Vergleichsmodus aktiv)
-        let pathBHtml = '';
-        if (ptsB.length > 1) {
-            const pathB = ptsB
-                .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${xToSvg(p.distance).toFixed(1)} ${yToSvg(p.dropCm).toFixed(1)}`)
-                .join(' ');
-            pathBHtml = `<path d="${pathB}" fill="none" class="svg-traj-b" />`;
-        }
-
-        const yUnit = isImp() ? 'inch' : 'cm';
-
-        return `
-            <div class="svg-wrapper">
-                <div class="svg-header">
-                    <h3>${escapeHtml(t('graphTitle'))} (${yUnit})</h3>
-                    <div class="svg-legend">
-                        <span class="legend-item"><span class="legend-swatch swatch-a"></span> ${escapeHtml(t('graphBulletA'))}</span>
-                        ${ptsB.length > 1 ? `<span class="legend-item"><span class="legend-swatch swatch-b"></span> ${escapeHtml(t('graphBulletB'))}</span>` : ''}
-                        <span class="legend-item"><span class="legend-swatch swatch-sight"></span> ${escapeHtml(t('graphSightLine'))}</span>
-                    </div>
-                </div>
-                <svg viewBox="0 0 ${width} ${height}" class="trajectory-svg" role="img" aria-label="${escapeHtml(t('graphTitle'))}">
-                    ${gridHtml}
-                    ${sightLineHtml}
-                    ${transonicHtml}
-                    ${pathBHtml}
-                    <path d="${pathA}" fill="none" class="svg-traj-a" />
-                </svg>
-            </div>
-        `;
-    }
-
-    // -------------------------------------------------------------------------
-    // 11. INFO-BUTTON & LEXIKON-MODAL HELFER
-    // -------------------------------------------------------------------------
-    function infoBtnHtml(lexiconId) {
-        return `<button type="button" class="info-btn" data-lexicon="${lexiconId}" aria-label="Info ${lexiconId}" title="Info">i</button>`;
-    }
-
-    function renderLexiconModal() {
-        if (!activeModalLexiconId) return '';
-        const item = LEXICON_ITEMS.find(x => x.id === activeModalLexiconId);
-        if (!item) return '';
-        const lang = state.lang === 'en' ? 'en' : 'de';
-
-        return `
-            <div class="modal-backdrop" id="lexicon-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-                <div class="modal-card">
-                    <div class="modal-header">
-                        <h3 id="modal-title">${escapeHtml(item.title[lang])}</h3>
-                        <button type="button" class="btn btn-secondary btn-sm" id="close-lexicon-modal">${escapeHtml(t('closeModal'))}</button>
-                    </div>
-                    <p class="modal-body">${escapeHtml(item.desc[lang])}</p>
-                    <div class="modal-footer">
-                        <a href="${escapeHtml(item.wiki[lang])}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">
-                            ${escapeHtml(t('openWiki'))} ↗
-                        </a>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    // -------------------------------------------------------------------------
-    // 12. ANSICHTEN RENDERN (Rechner, Waffen, Logbuch, Lexikon)
-    // -------------------------------------------------------------------------
-    function renderCalculatorTab() {
-        const activeWeapon = getActiveWeapon();
-        const cal = getCaliberById(activeWeapon ? activeWeapon.caliberId : state.calc.caliberFilter);
-        const allLoads = getAllLoads();
-
-        // Gefilterte Laborierungen für Dropdown
-        const searchLower = (state.calc.loadSearch || '').trim().toLowerCase();
-        const filteredLoads = allLoads.filter(l => {
-            const matchesCal = !state.calc.caliberFilter || state.calc.caliberFilter === 'all' || l.caliber === state.calc.caliberFilter;
-            const fullText = `${l.maker} ${l.bullet} ${l.grains}gr`.toLowerCase();
-            const matchesSearch = !searchLower || fullText.includes(searchLower);
-            return matchesCal && matchesSearch;
+          });
         });
+      });
+    }
+    state.dbOk = issues.length === 0;
+    state.dbIssues = issues;
+  }
 
-        // Hauptberechnung ausführen
-        const resA = BallisticsEngine.calculateTrajectory({
-            bulletWeightGrains: state.calc.bulletWeightGrains,
-            bc: state.calc.bc,
-            dragModel: state.calc.dragModel,
-            v0: state.calc.v0Ms,
-            sightHeightCm: state.calc.sightHeightCm,
-            zeroDistanceM: state.calc.zeroDistanceM,
-            maxDistanceM: state.calc.maxDistanceM,
-            stepDistanceM: state.calc.stepDistanceM,
-            shotAngleDeg: state.calc.shotAngleDeg,
-            windSpeedMs: state.calc.windSpeedMs,
-            windDirectionDeg: state.calc.windDirectionDeg,
-            latitudeDeg: state.calc.latitudeDeg,
-            azimuthDeg: state.calc.azimuthDeg,
-            clickUnit: state.calc.clickUnit,
-            twistDirection: activeWeapon ? activeWeapon.twistDirection : 'right',
-            twistRateInches: activeWeapon ? activeWeapon.twistRateIn : 10,
-            caliberInches: cal ? cal.diameterIn : 0.308,
-            tempC: state.calc.tempC,
-            pressureHpa: state.calc.pressureHpa,
-            humidityPercent: state.calc.humidityPercent,
-            sameWeatherAsCurrent: state.calc.sameWeatherAsCurrent,
-            zeroTempC: state.calc.zeroTempC,
-            zeroPressureHpa: state.calc.zeroPressureHpa,
-            zeroHumidityPercent: state.calc.zeroHumidityPercent
+  function dbOf(type) { return type === 'short' ? window.AMMO_DB_SHORT : window.AMMO_DB_LONG; }
+  function metaOf(type) { return type === 'short' ? window.CALIBER_META_SHORT : window.CALIBER_META_LONG; }
+
+  function calibersOf(type) {
+    if (!state.dbOk) return [];
+    return Object.keys(dbOf(type) || {});
+  }
+
+  function overrideKey(type, caliber, name) { return type + '::' + caliber + '::' + name; }
+
+  /* Laborierungen mit Overrides, Generisch immer zuerst, Basis bleibt unberührt. */
+  function loadingsOf(type, caliber) {
+    if (!state.dbOk) return [];
+    var base = (dbOf(type) || {})[caliber];
+    if (!Array.isArray(base)) return [];
+    var list = base.map(function (e, i) {
+      var merged = JSON.parse(JSON.stringify(e));
+      var ov = state.overrides[overrideKey(type, caliber, e.n)];
+      var overridden = false;
+      if (ov && ov.fields) {
+        overridden = true;
+        ['bcG1', 'bcG7', 'v0', 'barrelMm', 'g'].forEach(function (k) {
+          if (k in ov.fields) merged[k] = ov.fields[k];
         });
-
-        // Optionale Vergleichsberechnung (Munition B)
-        let resB = null;
-        if (state.calc.compareEnabled) {
-            const calB = getCaliberById(state.calc.compareCaliberId);
-            resB = BallisticsEngine.calculateTrajectory({
-                bulletWeightGrains: state.calc.compareGrains,
-                bc: state.calc.compareBc,
-                dragModel: state.calc.dragModel,
-                v0: state.calc.compareV0Ms,
-                sightHeightCm: state.calc.sightHeightCm,
-                zeroDistanceM: state.calc.zeroDistanceM,
-                maxDistanceM: state.calc.maxDistanceM,
-                stepDistanceM: state.calc.stepDistanceM,
-                shotAngleDeg: state.calc.shotAngleDeg,
-                windSpeedMs: state.calc.windSpeedMs,
-                windDirectionDeg: state.calc.windDirectionDeg,
-                latitudeDeg: state.calc.latitudeDeg,
-                azimuthDeg: state.calc.azimuthDeg,
-                clickUnit: state.calc.clickUnit,
-                twistDirection: activeWeapon ? activeWeapon.twistDirection : 'right',
-                twistRateInches: activeWeapon ? activeWeapon.twistRateIn : 10,
-                caliberInches: calB ? calB.diameterIn : 0.264,
-                tempC: state.calc.tempC,
-                pressureHpa: state.calc.pressureHpa,
-                humidityPercent: state.calc.humidityPercent,
-                sameWeatherAsCurrent: state.calc.sameWeatherAsCurrent,
-                zeroTempC: state.calc.zeroTempC,
-                zeroPressureHpa: state.calc.zeroPressureHpa,
-                zeroHumidityPercent: state.calc.zeroHumidityPercent
-            });
+        if (ov.refV && merged.ref && Array.isArray(merged.ref.v)) {
+          ov.refV.forEach(function (v, idx) { if (idx < merged.ref.v.length) merged.ref.v[idx] = v; });
         }
-
-        const transonicDisp = resA.transonicDistance
-            ? (isImp() ? `${Math.round(resA.transonicDistance * 1.0936133)} yd` : `${resA.transonicDistance} m`)
-            : t('transonicNone');
-
-        // Sensor-Ampel HTML (Barrierefrei: Farbe + Symbol + Text + Streuung)
-        let sensorBadgeHtml = `<div class="sensor-status neutral">ℹ ${escapeHtml(t('sensorIdle'))}</div>`;
-        if (sensorState.status === 'measuring') {
-            sensorBadgeHtml = `<div class="sensor-status warning">⏳ ${escapeHtml(sensorState.message)}</div>`;
-        } else if (sensorState.status === 'error') {
-            sensorBadgeHtml = `<div class="sensor-status danger">✖ ${escapeHtml(sensorState.message)}</div>`;
-        } else if (sensorState.status === 'done') {
-            const icon = sensorState.trafficLight === 'green' ? '✔' : (sensorState.trafficLight === 'yellow' ? '⚠' : '✖');
-            const cls = sensorState.trafficLight === 'green' ? 'success' : (sensorState.trafficLight === 'yellow' ? 'warning' : 'danger');
-            sensorBadgeHtml = `
-                <div class="sensor-status ${cls}">
-                    <strong>${icon} ${escapeHtml(sensorState.message)}</strong> — ${escapeHtml(t('sensorSpread'))}: ${sensorState.spreadDeg.toFixed(1)}°
-                </div>
-            `;
+        if (ov.refE && merged.ref && Array.isArray(merged.ref.e)) {
+          ov.refE.forEach(function (v, idx) { if (idx < merged.ref.e.length) merged.ref.e[idx] = v; });
         }
+        if (ov.drop && merged.dropCm && Array.isArray(merged.dropCm.values)) {
+          ov.drop.forEach(function (v, idx) { if (idx < merged.dropCm.values.length) merged.dropCm.values[idx] = v; });
+        }
+      }
+      return { entry: merged, overridden: overridden, baseIndex: i };
+    });
+    list.sort(function (a, b) {
+      var ga = a.entry.generic === true ? 0 : 1;
+      var gb = b.entry.generic === true ? 0 : 1;
+      return ga - gb || a.baseIndex - b.baseIndex;
+    });
+    return list;
+  }
 
-        // Vergleichs-Munition B Loads
-        const loadsB = allLoads.filter(l => l.caliber === state.calc.compareCaliberId);
+  function resolveSelection(type, selObj) {
+    var cals = calibersOf(type);
+    if (cals.length === 0) return null;
+    var caliber = cals.indexOf(selObj.caliber) >= 0 ? selObj.caliber : cals[0];
+    var list = loadingsOf(type, caliber);
+    if (list.length === 0) return null;
+    var idx = 0;
+    for (var i = 0; i < list.length; i++) if (list[i].entry.n === selObj.name) { idx = i; break; }
+    selObj.caliber = caliber;
+    selObj.name = list[idx].entry.n;
+    return { type: type, caliber: caliber, index: idx, entry: list[idx].entry, overridden: list[idx].overridden, list: list };
+  }
 
-        // Tabellenzeilen aufbauen
-        const rowsHtml = resA.tablePoints.map((ptA, idx) => {
-            const distDisp = isImp() ? `${Math.round(ptA.distance * 1.0936133)} yd` : `${ptA.distance} m`;
-            const velDisp = isImp() ? `${Math.round(ptA.velocity * 3.2808399)} fps` : `${Math.round(ptA.velocity)} m/s`;
-            const ptB = resB && resB.tablePoints[idx] ? resB.tablePoints[idx] : null;
-            const diffDropCm = ptB ? (ptA.dropCm - ptB.dropCm) : null;
+  function activeProfile() {
+    for (var i = 0; i < state.profiles.length; i++) if (state.profiles[i].id === state.activeProfileId) return state.profiles[i];
+    return null;
+  }
 
-            return `
-                <tr>
-                    <td><strong>${distDisp}</strong></td>
-                    <td>${fmtDropDisplay(ptA.dropCm)}</td>
-                    <td>${ptA.mil.toFixed(2)}</td>
-                    <td><strong>${ptA.clicks}</strong></td>
-                    <td>${velDisp}</td>
-                    <td>${fmtEnergyDisplay(ptA.energy)}</td>
-                    <td>${ptA.tof.toFixed(2)} s</td>
-                    <td>${fmtDropDisplay(ptA.coriolisCm)}</td>
-                    <td>${fmtDropDisplay(ptA.spinDriftCm)}</td>
-                    <td>${fmtDropDisplay(ptA.windDriftCm)}</td>
-                    ${resB ? `<td>${diffDropCm !== null ? fmtDropDisplay(diffDropCm) : '-'}</td>` : ''}
-                </tr>
-            `;
+  /* --------------------------------------------------------------------------
+   * Formatierung: null/NaN => Strich, niemals 0 oder NaN.
+   * ------------------------------------------------------------------------*/
+  function fmt(n, dec) {
+    if (n === null || n === undefined || typeof n !== 'number' || !isFinite(n)) return '–';
+    return n.toFixed(dec == null ? 0 : dec);
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function isImp() { return state.units === 'imperial'; }
+  function dispDist(m, dec) { return isImp() ? fmt(B.convert.mToYd(m), dec == null ? 0 : dec) : fmt(m, dec == null ? 0 : dec); }
+  function distUnit() { return isImp() ? 'yd' : 'm'; }
+  function dispVel(ms, dec) { return isImp() ? fmt(B.convert.msToFps(ms), dec == null ? 0 : dec) : fmt(ms, dec == null ? 0 : dec); }
+  function velUnit() { return isImp() ? 'fps' : 'm/s'; }
+  function dispEn(j, dec) { return isImp() ? fmt(B.convert.jToFtLb(j), dec == null ? 0 : dec) : fmt(j, dec == null ? 0 : dec); }
+  function enUnit() { return isImp() ? 'ft·lb' : 'J'; }
+  function dispLen(cm, dec) { return isImp() ? fmt(B.convert.cmToIn(cm), dec == null ? 1 : dec) : fmt(cm, dec == null ? 1 : dec); }
+  function lenUnit() { return isImp() ? 'in' : 'cm'; }
+  function num(v) { return B.toNum(v); }
+  function inputValue(v) { return v === null || v === undefined ? '' : String(v); }
+
+  /* --------------------------------------------------------------------------
+   * Berechnung
+   * ------------------------------------------------------------------------*/
+  function defaultZero(type) { return type === 'short' ? 25 : 100; }
+  function defaultSight(type) { return type === 'short' ? 2.5 : 4; }
+
+  function calcFor(sel) {
+    var e = sel.entry;
+    var meta = (metaOf(sel.type) || {})[sel.caliber] || {};
+    var profile = activeProfile();
+    var refOnly = e.generic === true || e.bcG1 == null;
+    var out = { sel: sel, refOnly: refOnly, noV0: e.v0 == null, result: null, g7Fallback: false };
+    if (refOnly || e.v0 == null) return out;
+    var model = state.shot.dragModel;
+    var bc = e.bcG1;
+    if (model === 'G7') {
+      if (e.bcG7 != null) bc = e.bcG7;
+      else { model = 'G1'; out.g7Fallback = true; }
+    }
+    var maxRange = sel.type === 'short' ? 100 : (state.shot.extended ? 1000 : 300);
+    out.result = B.computeTrajectory({
+      v0Ms: e.v0, bc: bc, dragModel: model, weightGr: e.g,
+      diameterIn: meta.diameterInch != null ? meta.diameterInch : null,
+      twistIn: profile && profile.twistIn != null ? profile.twistIn : null,
+      zeroM: state.shot.zeroM != null ? state.shot.zeroM : defaultZero(sel.type),
+      sightHeightM: (state.shot.sightHeightCm != null ? state.shot.sightHeightCm : defaultSight(sel.type)) / 100,
+      maxRangeM: maxRange, stepM: 50,
+      tempC: num(state.env.tempC), pressureHpa: num(state.env.pressureHpa),
+      humidity: num(state.env.humidityPct) != null ? num(state.env.humidityPct) / 100 : null,
+      altitudeM: num(state.env.altitudeM),
+      windSpeedMs: num(state.env.windSpeedMs) || 0, windAngleDeg: num(state.env.windAngleDeg) || 0,
+      latitudeDeg: num(state.env.latitudeDeg), azimuthDeg: num(state.env.azimuthDeg) || 0,
+      enableCoriolis: state.env.enableCoriolis, enableSpinDrift: state.env.enableSpinDrift,
+      clickUnit: state.shot.clickUnit
+    });
+    return out;
+  }
+
+  /* Referenzwerte als Map: Distanz -> {v, e}. Fehlende Werte bleiben null. */
+  function refMap(entry, includeExtra) {
+    var map = {};
+    if (entry.ref && Array.isArray(entry.ref.distances)) {
+      entry.ref.distances.forEach(function (d, i) {
+        map[d] = { v: entry.ref.v && entry.ref.v[i] != null ? entry.ref.v[i] : null,
+                   e: entry.ref.e && entry.ref.e[i] != null ? entry.ref.e[i] : null };
+      });
+    }
+    if (includeExtra && entry.refExtra && Array.isArray(entry.refExtra.distances)) {
+      entry.refExtra.distances.forEach(function (d, i) {
+        map[d] = { v: entry.refExtra.v && entry.refExtra.v[i] != null ? entry.refExtra.v[i] : null,
+                   e: entry.refExtra.e && entry.refExtra.e[i] != null ? entry.refExtra.e[i] : null };
+      });
+    }
+    return map;
+  }
+
+  function dropMap(entry) {
+    var map = {};
+    if (entry.dropCm && Array.isArray(entry.dropCm.distances)) {
+      entry.dropCm.distances.forEach(function (d, i) {
+        map[d] = entry.dropCm.values && entry.dropCm.values[i] != null ? entry.dropCm.values[i] : null;
+      });
+    }
+    return map;
+  }
+
+  function diffBadge(calc, ref) {
+    if (calc == null || ref == null || !isFinite(calc) || !isFinite(ref) || ref === 0) return '';
+    var pct = (calc - ref) / ref * 100;
+    var cls = Math.abs(pct) < 5 ? 'diff-ok' : (Math.abs(pct) < 15 ? 'diff-warn' : 'diff-bad');
+    return '<span class="diff ' + cls + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%</span>';
+  }
+
+  /* Eine Ergebniskarte (berechnet + Referenz nebeneinander, gleiches Raster). */
+  function resultCard(calcOut, label) {
+    if (!calcOut) return '';
+    var sel = calcOut.sel, e = sel.entry, res = calcOut.result;
+    var meta = (metaOf(sel.type) || {})[sel.caliber] || {};
+    var maxRange = sel.type === 'short' ? 100 : (state.shot.extended ? 1000 : 300);
+    var includeExtra = sel.type === 'short' && state.shot.show25;
+    var refs = refMap(e, includeExtra);
+    var drops = dropMap(e);
+    var samples = {};
+    if (res && res.samples) res.samples.forEach(function (s) { samples[s.dM] = s; });
+
+    // Gemeinsames Raster: 50er-Schritte plus optional 25 m (nur Referenz).
+    var grid = [];
+    for (var d = 50; d <= maxRange; d += 50) grid.push(d);
+    Object.keys(refs).map(Number).forEach(function (d) {
+      if (d > 0 && d <= maxRange && grid.indexOf(d) < 0) grid.push(d);
+    });
+    Object.keys(drops).map(Number).forEach(function (d) {
+      if (d > 0 && d <= maxRange && grid.indexOf(d) < 0) grid.push(d);
+    });
+    grid.sort(function (a, b) { return a - b; });
+
+    var badges = '';
+    if (e.generic === true) badges += '<span class="badge badge-generic">' + esc(t('genericBadge')) + '</span>';
+    if (e.verified !== true) badges += '<span class="badge badge-warn">' + esc(t('unverified')) + '</span>';
+    else badges += '<span class="badge badge-ok">' + esc(t('verified')) + '</span>';
+    if (calcOut.overridden || sel.overridden) badges += '<span class="badge badge-accent">' + esc(t('overrideActive')) + '</span>';
+
+    var notices = '';
+    if (calcOut.noV0) notices += '<div class="notice notice-warn">' + esc(t('noV0Notice')) + '</div>';
+    if (calcOut.refOnly) notices += '<div class="notice notice-info">' + esc(t('refOnlyNotice')) + '</div>';
+    if (calcOut.g7Fallback) notices += '<div class="notice notice-warn">' + esc(t('g7Fallback')) + '</div>';
+
+    // Mündungszeile: V0/E0 aus Eingabe bzw. Rechnung, Referenz aus DB (null => –).
+    var ref0 = refs[0] || { v: null, e: null };
+    var muzzleCalcV = e.v0, muzzleCalcE = res ? res.muzzleEnergyJ : null;
+
+    var calcRows = '', refRows = '';
+    grid.forEach(function (d) {
+      var s = samples[d] || null;
+      var r = refs[d] || { v: null, e: null };
+      var dropRef = drops[d] != null ? drops[d] : null;
+      if (res && !calcOut.refOnly && !calcOut.noV0) {
+        calcRows += '<tr><td class="num">' + dispDist(d) + '</td>' +
+          '<td class="num">' + dispVel(s ? s.vMs : null) + diffBadge(s ? s.vMs : null, r.v) + '</td>' +
+          '<td class="num">' + dispEn(s ? s.energyJ : null) + diffBadge(s ? s.energyJ : null, r.e) + '</td>' +
+          '<td class="num strong">' + dispLen(s ? s.dropCm : null) + '</td>' +
+          '<td class="num">' + fmt(s ? s.tofS : null, 3) + '</td>' +
+          '<td class="num">' + dispLen(s ? s.totalDriftCm : null) + '</td>' +
+          '<td class="num">' + (s && s.clicks != null ? s.clicks : '–') +
+            '<span class="sub">' + (s ? fmt(state.shot.clickUnit === 'moa25' ? s.elevMoa : s.elevMil, 2) : '–') +
+            (state.shot.clickUnit === 'moa25' ? ' MOA' : ' MIL') + '</span></td></tr>';
+      }
+      refRows += '<tr><td class="num">' + dispDist(d) + '</td>' +
+        '<td class="num">' + dispVel(r.v) + '</td>' +
+        '<td class="num">' + dispEn(r.e) + '</td>' +
+        '<td class="num">' + dispLen(dropRef) + '</td></tr>';
+    });
+
+    var clickLabel = state.shot.clickUnit === 'moa25' ? '¼ MOA' : '0.1 MIL';
+    var computedHtml;
+    if (res && !calcOut.refOnly && !calcOut.noV0) {
+      computedHtml =
+        '<div class="table-block"><h4>' + esc(t('computedTable')) + '</h4>' +
+        '<div class="table-scroll"><table class="data-table"><thead><tr>' +
+        '<th>' + esc(t('distance')) + ' (' + distUnit() + ')</th><th>' + esc(t('velocity')) + ' (' + velUnit() + ')</th>' +
+        '<th>' + esc(t('energy')) + ' (' + enUnit() + ')</th><th>' + esc(t('drop')) + ' (' + lenUnit() + ')</th>' +
+        '<th>' + esc(t('time')) + ' (s)</th><th>' + esc(t('drift')) + ' (' + lenUnit() + ')</th>' +
+        '<th>' + esc(t('clicks')) + ' (' + clickLabel + ')</th></tr></thead><tbody>' +
+        '<tr class="muzzle-row"><td class="num">0</td><td class="num">' + dispVel(muzzleCalcV) + '</td>' +
+        '<td class="num">' + dispEn(muzzleCalcE) + '</td><td class="num">' + dispLen(-(state.shot.sightHeightCm != null ? state.shot.sightHeightCm : defaultSight(sel.type))) + '</td>' +
+        '<td class="num">0.000</td><td class="num">' + dispLen(0) + '</td><td class="num">–</td></tr>' +
+        calcRows + '</tbody></table></div></div>';
+    } else {
+      computedHtml = '<div class="table-block"><h4>' + esc(t('computedTable')) + '</h4>' +
+        '<div class="notice notice-muted">' + esc(calcOut.noV0 ? t('noV0Notice') : t('refOnlyNotice')) + '</div></div>';
+    }
+
+    var refZero = e.dropCm && e.dropCm.zero != null ? dispDist(e.dropCm.zero) + ' ' + distUnit() : t('refZeroUnknown');
+    var referenceHtml =
+      '<div class="table-block"><h4>' + esc(t('refTable')) + '</h4>' +
+      '<div class="table-scroll"><table class="data-table"><thead><tr>' +
+      '<th>' + esc(t('distance')) + ' (' + distUnit() + ')</th><th>' + esc(t('velocity')) + ' (' + velUnit() + ')</th>' +
+      '<th>' + esc(t('energy')) + ' (' + enUnit() + ')</th><th>' + esc(t('drop')) + ' (' + lenUnit() + ')</th>' +
+      '</tr></thead><tbody>' +
+      '<tr class="muzzle-row"><td class="num">0</td><td class="num">' + dispVel(ref0.v) + '</td>' +
+      '<td class="num">' + dispEn(ref0.e) + '</td><td class="num">–</td></tr>' +
+      refRows + '</tbody></table></div>' +
+      '<p class="hint">' + esc(t('zeroOfRef')) + ': ' + esc(refZero) + '</p></div>';
+
+    // Meta-Chips: BC, Gewicht, MRD, GEE (Kurzwaffe immer null), Miller, Atmosphäre.
+    var gee = sel.type === 'short' ? null : (e.gee != null ? e.gee : null);
+    var chips =
+      chip('BC ' + (res ? res.dragModel : 'G1'), res ? fmt(res.bcUsed, 3) : fmt(e.bcG1, 3)) +
+      chip(t('weight'), fmt(e.g, 0) + ' gr') +
+      chip('V0', dispVel(e.v0) + ' ' + velUnit()) +
+      chip(t('barrelDb'), e.barrelMm != null ? fmt(e.barrelMm, 0) + ' mm' : '–') +
+      chip(t('mrd'), e.mrd != null ? dispDist(e.mrd) + ' ' + distUnit() : '–') +
+      chip(t('gee'), gee != null ? dispDist(gee) + ' ' + distUnit() : '–') +
+      chip(t('miller'), res && res.miller ? fmt(res.miller.sg, 2) + ' · ' + t(res.miller.stabilityClass) : '–');
+
+    var atmoHtml = '';
+    if (res && res.atmo) {
+      atmoHtml = '<div class="atmo-strip">' +
+        chip(t('airDensity'), fmt(res.atmo.rho, 3) + ' kg/m³') +
+        chip(t('densityAlt'), dispDist(res.atmo.densityAltitudeM) + ' ' + distUnit()) +
+        chip(t('soundSpeed'), dispVel(res.atmo.speedOfSoundMs) + ' ' + velUnit()) +
+        (res.transsonicM != null ? chip(t('transsonic'), dispDist(res.transsonicM) + ' ' + distUnit()) : '') +
+        (res.subsonicM != null ? chip(t('subsonic'), dispDist(res.subsonicM) + ' ' + distUnit()) : '') +
+        '</div>';
+    }
+
+    var riflemanHtml = '';
+    var angle = num(state.env.shotAngleDeg);
+    if (angle != null && Math.abs(angle) > 0.5) {
+      var rows = '';
+      grid.forEach(function (d) {
+        if (d % 50 !== 0) return;
+        var eq = B.riflemanEquivalentRangeM(d, angle);
+        rows += '<tr><td class="num">' + dispDist(d) + '</td><td class="num">' + dispDist(eq, 0) + '</td></tr>';
+      });
+      riflemanHtml = '<div class="table-block"><h4>' + esc(t('rifleman')) + ' · ' + fmt(angle, 0) + '°</h4>' +
+        '<p class="hint">' + esc(t('riflemanHint')) + '</p>' +
+        '<div class="table-scroll"><table class="data-table"><thead><tr><th>' + esc(t('slant')) + ' (' + distUnit() + ')</th>' +
+        '<th>' + esc(t('horizontal')) + ' (' + distUnit() + ')</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+    }
+
+    var sourceHtml = '';
+    if (e.sourceNote || e.sourceUrl) {
+      sourceHtml = '<p class="hint">' + esc(t('sourceNote')) + ': ' + esc(e.sourceNote || '') +
+        (e.sourceUrl ? ' · <a href="' + esc(e.sourceUrl) + '" target="_blank" rel="noopener noreferrer">Link</a>' : '') + '</p>';
+    }
+
+    return '<article class="card result-card">' +
+      '<header class="result-head"><div><span class="result-label">' + esc(label) + '</span>' +
+      '<h3>' + esc(sel.caliber) + ' · ' + esc(e.n) + '</h3><div class="badges">' + badges + '</div></div>' +
+      '<button class="btn btn-ghost" data-action="edit-loading" data-type="' + sel.type + '" data-caliber="' + esc(sel.caliber) + '" data-name="' + esc(e.n) + '">' + esc(t('editLoading')) + '</button></header>' +
+      notices + '<div class="chips">' + chips + '</div>' + atmoHtml +
+      '<div class="tables-duo">' + computedHtml + referenceHtml + '</div>' +
+      riflemanHtml + sourceHtml + '</article>';
+  }
+
+  function chip(label, value) {
+    return '<span class="chip"><span class="chip-label">' + esc(label) + '</span><span class="chip-value">' + esc(value) + '</span></span>';
+  }
+
+  /* --------------------------------------------------------------------------
+   * Shell und Rendering
+   * ------------------------------------------------------------------------*/
+  var root = null;
+
+  function buildShell() {
+   root.innerHTML =
+    '<header class="topbar">' +
+      '<div class="brand"><span class="brand-mark">◎</span><div><h1>' + esc(t('appTitle')) + '</h1><span class="tagline">' + esc(t('tagline')) + '</span></div></div>' +
+      // Quick-Toggles wurden entfernt und in die Einstellungen integriert
+    '</header>' +
+    (state.dbOk ? '' : '<div class="db-error" role="alert">' + esc(t('dbError')) + '</div>') +
+    '<main class="main">' +
+      '<section class="section" id="sec-calc"></section>' +
+      '<section class="section" id="sec-profiles"></section>' +
+      '<section class="section" id="sec-log"></section>' +
+      '<section class="section" id="sec-settings"></section>' +
+    '</main>' +
+    '<div class="disclaimer-bar"><span>' + esc(t('disclaimer')) + '</span></div>' +
+    '<nav class="bottomnav">' +
+      navBtn('calc', '⌖', t('navCalc')) + navBtn('profiles', '🗂', t('navProfiles')) +
+      navBtn('log', '✎', t('navLog')) + navBtn('settings', '⚙', t('navSettings')) +
+    '</nav>' +
+    '<div id="modal-root"></div><div id="toast-root" aria-live="polite"></div>' +
+    '<input type="file" id="import-file" accept="application/json,.json" hidden>';
+  renderCalcSection();
+  renderProfiles();
+  renderLogbook();
+  renderSettings();
+  showSection(state.section);
+}
+
+  function navBtn(sec, icon, label) {
+    return '<button class="nav-btn' + (state.section === sec ? ' active' : '') + '" data-action="nav" data-section="' + sec + '">' +
+      '<span class="nav-icon">' + icon + '</span><span>' + esc(label) + '</span></button>';
+  }
+
+  function showSection(sec) {
+    state.section = sec;
+    ['calc', 'profiles', 'log', 'settings'].forEach(function (s) {
+      var el = document.getElementById('sec-' + s);
+      if (el) el.classList.toggle('visible', s === sec);
+    });
+    root.querySelectorAll('.nav-btn').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-section') === sec);
+    });
+    window.scrollTo(0, 0);
+  }
+
+  function selectHtml(field, options, selected, extra) {
+    var h = '<select class="input" data-field="' + field + '"' + (extra || '') + '>';
+    options.forEach(function (o) {
+      h += '<option value="' + esc(o.value) + '"' + (String(o.value) === String(selected) ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+    });
+    return h + '</select>';
+  }
+
+  function fieldHtml(label, field, value, opts) {
+    opts = opts || {};
+    var info = opts.topic ? '<button class="info-btn" data-action="lexicon" data-topic="' + opts.topic + '" title="Info">ⓘ</button>' : '';
+    return '<label class="field"><span class="field-label">' + esc(label) + info + '</span>' +
+      '<input class="input" type="number" inputmode="decimal" step="' + (opts.step || 'any') + '"' +
+      (opts.min != null ? ' min="' + opts.min + '"' : '') + (opts.max != null ? ' max="' + opts.max + '"' : '') +
+      ' data-field="' + field + '" value="' + inputValue(value) + '" placeholder="' + (opts.placeholder || '–') + '"></label>';
+  }
+
+  function toggleHtml(label, field, checked, topic) {
+    var info = topic ? '<button class="info-btn" data-action="lexicon" data-topic="' + topic + '" title="Info">ⓘ</button>' : '';
+    return '<label class="toggle-row"><span class="field-label">' + esc(label) + info + '</span>' +
+      '<span class="switch"><input type="checkbox" data-field="' + field + '"' + (checked ? ' checked' : '') + '><span class="slider"></span></span></label>';
+  }
+
+  /* Rechner-Sektion: Munitionswahl, Umgebung, Setup, Ergebnisse. */
+  function renderCalcSection() {
+    var sec = document.getElementById('sec-calc');
+    if (!sec) return;
+    if (!state.dbOk) {
+      sec.innerHTML = '<div class="card"><div class="notice notice-warn">' + esc(t('dbError')) + '</div>' +
+        '<p class="hint">' + esc(t('noDb')) + '</p></div>';
+      return;
+    }
+    sec.innerHTML =
+      '<div class="card ammo-panel">' +
+        '<div class="segmented" role="tablist">' +
+          '<button class="seg-btn' + (state.weaponType === 'long' ? ' active' : '') + '" data-action="weapon-type" data-type="long">' + esc(t('tabLong')) + '</button>' +
+          '<button class="seg-btn' + (state.weaponType === 'short' ? ' active' : '') + '" data-action="weapon-type" data-type="short">' + esc(t('tabShort')) + '</button>' +
+        '</div>' +
+        '<div class="ammo-selects" id="ammo-selects"></div>' +
+        '<div class="compare-row">' + toggleHtml(t('compare'), 'compareOn', state.compareOn) + '</div>' +
+        '<div id="compare-selects"></div>' +
+      '</div>' +
+      '<div class="card env-panel"><h3>' + esc(t('env')) + '</h3>' +
+        '<div class="field-grid">' +
+          fieldHtml(t('temperature'), 'env.tempC', state.env.tempC, { step: '0.5' }) +
+          fieldHtml(t('pressure'), 'env.pressureHpa', state.env.pressureHpa, { step: '0.5', topic: 'densityalt' }) +
+          fieldHtml(t('humidity'), 'env.humidityPct', state.env.humidityPct, { step: '1', min: 0, max: 100 }) +
+          fieldHtml(t('altitude'), 'env.altitudeM', state.env.altitudeM, { step: '10' }) +
+          '<label class="field"><span class="field-label">' + esc(t('windSpeed')) + '</span>' +
+            '<div class="input-pair"><input class="input" type="number" inputmode="decimal" step="0.5" min="0" data-field="env.windSpeed" value="' + inputValue(windDisplay()) + '">' +
+            selectHtml('env.windUnit', [{ value: 'ms', label: 'm/s' }, { value: 'kmh', label: 'km/h' }], state.env.windUnit) + '</div></label>' +
+          '<label class="field"><span class="field-label">' + esc(t('windDir')) + ' <b id="wind-angle-val">' + fmt(num(state.env.windAngleDeg) || 0, 0) + '°</b></span>' +
+            '<input class="range" type="range" min="0" max="360" step="5" data-field="env.windAngleDeg" value="' + (num(state.env.windAngleDeg) || 0) + '">' +
+            '<span class="hint">' + esc(t('windDirHint')) + '</span></label>' +
+          fieldHtml(t('shotAngle'), 'env.shotAngleDeg', state.env.shotAngleDeg, { step: '1', min: -60, max: 60, topic: 'zero' }) +
+        '</div>' +
+         '<span class="grid-note">' + esc(t('windDirHint')) + '</span>' +
+         '<div class="geo-row">' +
+          '<button class="btn" data-action="gps">📍 ' + esc(t('gps')) + '</button>' +
+          selectHtml('city', [{ value: '', label: t('chooseCity') }].concat(CITIES.map(function (c, i) {
+            return { value: i, label: c.n + ' (' + c.c + ')' };
+          })), '', ' id="city-select"') +
+          '<button class="btn" data-action="weather">☁ ' + esc(t('fetchWeather')) + '</button>' +
+          '<button class="btn" data-action="sensor"' + (state.sensorRunning ? ' disabled' : '') + '>🧭 ' + esc(state.sensorRunning ? t('sensorRunning') : t('sensorSnapshot')) + '</button>' +
+        '</div>' +
+        '<div id="weather-card"></div><div id="sensor-card"></div>' +
+      '</div>' +
+      '<div class="card shot-panel"><h3>' + esc(t('shotSetup')) + '</h3>' +
+        '<div class="field-grid">' +
+          fieldHtml(t('zero') + ' (' + distUnit() + ')', 'shot.zeroDisplay', zeroDisplay(), { step: '5', min: 5, topic: 'zero', placeholder: String(defaultZero(state.weaponType)) }) +
+          fieldHtml(t('sightHeight'), 'shot.sightHeightCm', state.shot.sightHeightCm, { step: '0.5', min: 0, placeholder: String(defaultSight(state.weaponType)) }) +
+          '<label class="field"><span class="field-label">' + esc(t('clickUnit')) + '</span>' +
+            selectHtml('shot.clickUnit', [{ value: 'mil01', label: '0.1 MIL' }, { value: 'moa25', label: '¼ MOA' }], state.shot.clickUnit) + '</label>' +
+          '<label class="field"><span class="field-label">' + esc(t('dragModel')) + '<button class="info-btn" data-action="lexicon" data-topic="bc" title="Info">ⓘ</button></span>' +
+            selectHtml('shot.dragModel', [{ value: 'G1', label: 'G1' }, { value: 'G7', label: 'G7' }], state.shot.dragModel) + '</label>' +
+          fieldHtml(t('latitude'), 'env.latitudeDeg', state.env.latitudeDeg, { step: '0.1', min: -90, max: 90, topic: 'coriolis' }) +
+          fieldHtml(t('azimuth'), 'env.azimuthDeg', state.env.azimuthDeg, { step: '5', min: 0, max: 360, topic: 'eotvos' }) +
+        '</div>' +
+        '<div class="toggle-grid">' +
+          toggleHtml(t('coriolis'), 'env.enableCoriolis', state.env.enableCoriolis, 'coriolis') +
+          toggleHtml(t('spinDrift'), 'env.enableSpinDrift', state.env.enableSpinDrift, 'spindrift') +
+          (state.weaponType === 'long' ? toggleHtml(t('extendedRange'), 'shot.extended', state.shot.extended) : '') +
+          (state.weaponType === 'short' ? toggleHtml(t('show25'), 'shot.show25', state.shot.show25) : '') +
+        '</div>' +
+      '</div>' +
+      '<div id="results" class="results"></div>';
+    renderAmmoSelects();
+    renderCompareSelects();
+    renderWeatherCard();
+    renderSensorCard();
+    renderResults();
+  }
+
+  function windDisplay() {
+    var ms = num(state.env.windSpeedMs);
+    if (ms === null) return null;
+    return state.env.windUnit === 'kmh' ? Math.round(ms * 3.6 * 100) / 100 : ms;
+  }
+  function zeroDisplay() {
+    var z = state.shot.zeroM;
+    if (z === null) return null;
+    return isImp() ? Math.round(B.convert.mToYd(z) * 10) / 10 : z;
+  }
+
+  function renderAmmoSelects() {
+    var box = document.getElementById('ammo-selects');
+    if (!box || !state.dbOk) return;
+    var type = state.weaponType;
+    var sel = resolveSelection(type, state.sel[type]);
+    var cals = calibersOf(type);
+    var loadings = sel ? sel.list : [];
+    box.innerHTML =
+      '<label class="field"><span class="field-label">' + esc(t('caliber')) + '</span>' +
+      selectHtml('ammo.caliber', cals.map(function (c) { return { value: c, label: c }; }), sel ? sel.caliber : '') + '</label>' +
+      '<label class="field"><span class="field-label">' + esc(t('loading')) + '</span>' +
+      selectHtml('ammo.loading', loadings.map(function (l, i) {
+        var label = l.entry.n + (l.entry.generic === true ? ' · ' + t('genericBadge') : '') + (l.overridden ? ' · ' + t('overrideActive') : '');
+        return { value: i, label: label };
+      }), sel ? sel.index : 0) + '</label>';
+  }
+
+  function renderCompareSelects() {
+    var box = document.getElementById('compare-selects');
+    if (!box || !state.dbOk) return;
+    if (!state.compareOn) { box.innerHTML = ''; return; }
+    var sel = resolveSelection(state.cmp.type, state.cmp);
+    var cals = calibersOf(state.cmp.type);
+    box.innerHTML = '<div class="compare-box"><span class="field-label">' + esc(t('compareWith')) + '</span>' +
+      selectHtml('cmp.type', [{ value: 'long', label: t('tabLong') }, { value: 'short', label: t('tabShort') }], state.cmp.type) +
+      selectHtml('cmp.caliber', cals.map(function (c) { return { value: c, label: c }; }), sel ? sel.caliber : '') +
+      selectHtml('cmp.loading', (sel ? sel.list : []).map(function (l, i) {
+        return { value: i, label: l.entry.n + (l.entry.generic === true ? ' · ' + t('genericBadge') : '') };
+      }), sel ? sel.index : 0) + '</div>';
+  }
+
+  function renderResults() {
+    var box = document.getElementById('results');
+    if (!box) return;
+    if (!state.dbOk) { box.innerHTML = ''; return; }
+    var selA = resolveSelection(state.weaponType, state.sel[state.weaponType]);
+    var html = resultCard(calcFor(selA), 'A');
+    if (state.compareOn) {
+      var selB = resolveSelection(state.cmp.type, state.cmp);
+      html += resultCard(calcFor(selB), 'B');
+    }
+    box.innerHTML = '<div class="results-grid' + (state.compareOn ? ' two' : '') + '">' + html + '</div>';
+  }
+
+  function renderWeatherCard() {
+    var box = document.getElementById('weather-card');
+    if (!box) return;
+    var w = state.lastWeather;
+    if (!w) { box.innerHTML = state.env.locationName ? '<p class="hint">📍 ' + esc(state.env.locationName) + '</p>' : ''; return; }
+    box.innerHTML = '<div class="mini-card"><strong>' + esc(t('weatherAt')) + ' ' + esc(w.location || '') + ' · ' + esc(w.time || '') + '</strong>' +
+      '<div class="chips">' + chip('°C', fmt(w.tempC, 1)) + chip('hPa', fmt(w.pressureHpa, 1)) +
+      chip('%', fmt(w.humidityPct, 0)) + chip(t('windFrom'), fmt(w.windDirDeg, 0) + '° · ' + fmt(w.windSpeedMs, 1) + ' m/s') + '</div></div>';
+  }
+
+  function renderSensorCard() {
+    var box = document.getElementById('sensor-card');
+    if (!box) return;
+    var s = state.sensor;
+    if (!s) { box.innerHTML = ''; return; }
+    var cls = s.spreadDeg < 3 ? 'green' : (s.spreadDeg < 8 ? 'yellow' : 'red');
+    box.innerHTML = '<div class="mini-card sensor-card"><span class="sensor-dot ' + cls + '"></span>' +
+      '<span>' + esc(t('sensorHeading')) + ': <b>' + fmt(s.headingDeg, 1) + '°</b> · ' + esc(t('sensorSpread')) + ': <b>' + fmt(s.spreadDeg, 1) + '°</b></span>' +
+      '<button class="btn btn-small" data-action="apply-azimuth">' + esc(t('applyAzimuth')) + '</button></div>';
+  }
+
+  /* Profile */
+  function renderProfiles() {
+    var sec = document.getElementById('sec-profiles');
+    if (!sec) return;
+    var cards = state.profiles.map(function (p) {
+      var mm = p.barrelIn != null ? p.barrelIn * 25.4 : null;
+      return '<article class="card profile-card' + (p.id === state.activeProfileId ? ' active-profile' : '') + '">' +
+        '<header><h3>' + esc(p.name) + '</h3>' + (p.id === state.activeProfileId ? '<span class="badge badge-accent">' + esc(t('activeProfile')) + '</span>' : '') + '</header>' +
+        '<div class="chips">' + chip(t('weaponType'), p.type === 'short' ? t('tabShort') : t('tabLong')) +
+        chip(t('caliber'), p.caliber || '–') + chip(t('barrelIn'), fmt(p.barrelIn, 1) + ' in · ' + fmt(mm, 0) + ' mm') +
+        chip(t('twist'), p.twistIn != null ? fmt(p.twistIn, 1) : '–') +
+        chip(t('zero'), p.zeroM != null ? dispDist(p.zeroM) + ' ' + distUnit() : '–') + '</div>' +
+        '<div class="btn-row">' +
+        '<button class="btn" data-action="apply-profile" data-id="' + p.id + '">' + esc(t('applyProfile')) + '</button>' +
+        '<button class="btn btn-ghost" data-action="edit-profile" data-id="' + p.id + '">' + esc(t('edit')) + '</button>' +
+        '<button class="btn btn-danger" data-action="delete-profile" data-id="' + p.id + '">' + esc(t('delete')) + '</button>' +
+        '</div></article>';
+    }).join('');
+    sec.innerHTML = '<div class="section-head"><h2>' + esc(t('profiles')) + '</h2>' +
+      '<button class="btn btn-primary" data-action="new-profile">＋ ' + esc(t('newProfile')) + '</button></div>' +
+      (cards || '<div class="card"><p class="hint">' + esc(t('noProfiles')) + '</p></div>');
+  }
+
+  /* Logbuch */
+  function renderLogbook() {
+    var sec = document.getElementById('sec-log');
+    if (!sec) return;
+    var rows = state.logbook.slice().sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); })
+      .map(function (e) {
+        return '<article class="card log-card"><header><h3>' + esc(e.date || '–') + ' · ' + esc(e.weapon || '–') + '</h3>' +
+          '<div class="btn-row">' +
+          '<button class="btn btn-ghost btn-small" data-action="edit-log" data-id="' + e.id + '">' + esc(t('edit')) + '</button>' +
+          '<button class="btn btn-danger btn-small" data-action="delete-log" data-id="' + e.id + '">' + esc(t('delete')) + '</button></div></header>' +
+          '<div class="chips">' + chip(t('ammo'), e.ammo || '–') +
+          chip(t('distance'), e.distanceM != null ? dispDist(e.distanceM) + ' ' + distUnit() : '–') +
+          chip(t('groupSize'), e.groupCm != null ? dispLen(e.groupCm) + ' ' + lenUnit() : '–') + '</div>' +
+          (e.weather ? '<p class="hint">☁ ' + esc(e.weather) + '</p>' : '') +
+          (e.note ? '<p class="log-note">' + esc(e.note) + '</p>' : '') + '</article>';
+      }).join('');
+    sec.innerHTML = '<div class="section-head"><h2>' + esc(t('logbook')) + '</h2>' +
+      '<button class="btn btn-primary" data-action="new-log">＋ ' + esc(t('newEntry')) + '</button></div>' +
+      (rows || '<div class="card"><p class="hint">' + esc(t('noEntries')) + '</p></div>');
+  }
+
+  /* Einstellungen */
+  function renderSettings() {
+    var sec = document.getElementById('sec-settings');
+    if (!sec) return;
+    var vl = typeof window.AMMO_DB_VERSION_LONG === 'string' ? window.AMMO_DB_VERSION_LONG : '–';
+    var vs = typeof window.AMMO_DB_VERSION_SHORT === 'string' ? window.AMMO_DB_VERSION_SHORT : '–';
+    var stub = vl.indexOf('stub') === 0 || vs.indexOf('stub') === 0;
+    var testHtml = '';
+    if (state.selfTest) {
+      testHtml = state.selfTest.results.map(function (r) {
+        var checks = r.checks.map(function (c) {
+          return '<li class="' + (c.ok ? 'ok' : 'fail') + '">' + esc(c.label) + ': <b>' + fmt(c.value, 3) + ' ' + esc(c.unit) + '</b>' +
+            ' <span class="hint">[' + fmt(c.expectedMin, 2) + ' … ' + fmt(c.expectedMax, 2) + ']</span></li>';
         }).join('');
-
-        return `
-            <div class="grid-layout">
-                <!-- KARTE 1: MUNITION & WAFFEN-SETUP -->
-                <section class="card">
-                    <h2>${escapeHtml(t('loadSelect'))}</h2>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="calc-caliber-filter">${escapeHtml(t('caliber'))}</label>
-                            <select id="calc-caliber-filter">
-                                <option value="all" ${state.calc.caliberFilter === 'all' ? 'selected' : ''}>${escapeHtml(t('allCalibers'))}</option>
-                                ${CALIBERS.map(c => `<option value="${c.id}" ${state.calc.caliberFilter === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-load-search">${escapeHtml(t('searchLoad'))}</label>
-                            <input type="text" id="calc-load-search" value="${escapeHtml(state.calc.loadSearch)}" placeholder="${escapeHtml(t('searchLoad'))}" />
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="calc-load-select">${escapeHtml(t('loadSelect'))} (${filteredLoads.length})</label>
-                        <select id="calc-load-select">
-                            ${filteredLoads.map(l => `
-                                <option value="${l.id}" ${state.calc.loadId === l.id ? 'selected' : ''}>
-                                    ${escapeHtml(l.maker)} – ${escapeHtml(l.bullet)} (${l.grains}gr, BC ${l.bc}, ${fmtVelInput(l.v0)} ${isImp() ? 'fps' : 'm/s'})
-                                </option>
-                            `).join('')}
-                        </select>
-                        <small class="hint">${escapeHtml(t('v0Note'))}</small>
-                    </div>
-
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="calc-grains">${escapeHtml(t('bulletWeight'))}</label>
-                            <input type="number" step="0.1" id="calc-grains" value="${state.calc.bulletWeightGrains}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-bc">${escapeHtml(t('bcValue'))} ${infoBtnHtml('bc')}</label>
-                            <input type="number" step="0.001" id="calc-bc" value="${state.calc.bc}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-drag-model">${escapeHtml(t('dragModel'))}</label>
-                            <select id="calc-drag-model">
-                                <option value="G1" ${state.calc.dragModel === 'G1' ? 'selected' : ''}>G1</option>
-                                <option value="G7" ${state.calc.dragModel === 'G7' ? 'selected' : ''}>G7</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="calc-v0">${escapeHtml(t('v0Label'))} (${isImp() ? 'fps' : 'm/s'})</label>
-                            <input type="number" step="1" id="calc-v0" value="${fmtVelInput(state.calc.v0Ms)}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-sight-height">${escapeHtml(t('sightHeight'))} (${isImp() ? 'in' : 'cm'})</label>
-                            <input type="number" step="0.1" required id="calc-sight-height" value="${fmtSightInput(state.calc.sightHeightCm)}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-click-unit">${escapeHtml(t('clickUnit'))}</label>
-                            <select id="calc-click-unit">
-                                <option value="MIL" ${state.calc.clickUnit === 'MIL' ? 'selected' : ''}>0.1 MIL</option>
-                                <option value="MOA" ${state.calc.clickUnit === 'MOA' ? 'selected' : ''}>1/4 MOA</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Vergleichsmodus Toggle -->
-                    <div class="toggle-row">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="calc-compare-toggle" ${state.calc.compareEnabled ? 'checked' : ''} />
-                            <span>${escapeHtml(t('compareToggle'))}</span>
-                        </label>
-                    </div>
-
-                    ${state.calc.compareEnabled ? `
-                        <div class="sub-box">
-                            <h3>${escapeHtml(t('compareTitle'))}</h3>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="comp-caliber">${escapeHtml(t('caliber'))}</label>
-                                    <select id="comp-caliber">
-                                        ${CALIBERS.map(c => `<option value="${c.id}" ${state.calc.compareCaliberId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="comp-load">${escapeHtml(t('loadSelect'))}</label>
-                                    <select id="comp-load">
-                                        ${loadsB.map(l => `<option value="${l.id}" ${state.calc.compareLoadId === l.id ? 'selected' : ''}>${escapeHtml(l.maker)} ${escapeHtml(l.bullet)}</option>`).join('')}
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-row three-cols">
-                                <div class="form-group">
-                                    <label for="comp-grains">${escapeHtml(t('bulletWeight'))}</label>
-                                    <input type="number" step="0.1" id="comp-grains" value="${state.calc.compareGrains}" />
-                                </div>
-                                <div class="form-group">
-                                    <label for="comp-bc">BC (${state.calc.dragModel})</label>
-                                    <input type="number" step="0.001" id="comp-bc" value="${state.calc.compareBc}" />
-                                </div>
-                                <div class="form-group">
-                                    <label for="comp-v0">V0 (${isImp() ? 'fps' : 'm/s'})</label>
-                                    <input type="number" step="1" id="comp-v0" value="${fmtVelInput(state.calc.compareV0Ms)}" />
-                                </div>
-                            </div>
-                        </div>
-                    ` : ''}
-                </section>
-
-                <!-- KARTE 2: DISTANZEN, WIND & SCHUSSWINKEL -->
-                <section class="card">
-                    <h2>${escapeHtml(t('zeroDist'))}, ${escapeHtml(t('windSpeed'))} & ${escapeHtml(t('shotAngle'))}</h2>
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="calc-zero">${escapeHtml(t('zeroDist'))} (${distUnitLabel()})</label>
-                            <input type="number" step="5" id="calc-zero" value="${fmtDistInput(state.calc.zeroDistanceM)}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-max">${escapeHtml(t('maxDist'))} (${distUnitLabel()})</label>
-                            <input type="number" step="25" id="calc-max" value="${fmtDistInput(state.calc.maxDistanceM)}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-step">${escapeHtml(t('stepDist'))} (m)</label>
-                            <select id="calc-step">
-                                <option value="25" ${Number(state.calc.stepDistanceM) === 25 ? 'selected' : ''}>25 m</option>
-                                <option value="50" ${Number(state.calc.stepDistanceM) === 50 ? 'selected' : ''}>50 m</option>
-                                <option value="100" ${Number(state.calc.stepDistanceM) === 100 ? 'selected' : ''}>100 m</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="calc-wind-speed">${escapeHtml(t('windSpeed'))} (${isImp() ? 'mph' : 'm/s'}) ${infoBtnHtml('wind')}</label>
-                            <input type="number" step="0.5" id="calc-wind-speed" value="${fmtWindInput(state.calc.windSpeedMs)}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-wind-dir">${escapeHtml(t('windDir'))}</label>
-                            <input type="number" step="5" min="0" max="360" id="calc-wind-dir" value="${state.calc.windDirectionDeg}" />
-                            <small class="hint">${escapeHtml(t('windDirHint'))}</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-shot-angle">${escapeHtml(t('shotAngle'))}</label>
-                            <input type="number" step="0.5" min="-85" max="85" id="calc-shot-angle" value="${state.calc.shotAngleDeg}" />
-                        </div>
-                    </div>
-
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="calc-lat">${escapeHtml(t('latitudeLabel'))} ${infoBtnHtml('coriolis')}</label>
-                            <input type="number" step="0.1" min="-90" max="90" id="calc-lat" value="${state.calc.latitudeDeg}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-azimuth">${escapeHtml(t('azimuthLabel'))} ${infoBtnHtml('eotvos')}</label>
-                            <input type="number" step="1" min="0" max="360" id="calc-azimuth" value="${state.calc.azimuthDeg}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="geo-city-select">${escapeHtml(t('geoFallbackLabel'))}</label>
-                            <select id="geo-city-select">
-                                <option value="">-- Stadt / City --</option>
-                                ${CITIES_FALLBACK.map(c => `<option value="${c.lat}">${escapeHtml(c.name)} (${c.lat}°)</option>`).join('')}
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Smartphone Sensor Snapshot -->
-                    <div class="sub-box">
-                        <div class="flex-between">
-                            <strong>${escapeHtml(t('sensorSection'))}</strong>
-                            <button type="button" class="btn btn-secondary btn-sm" id="btn-sensor-snapshot">🧭 ${escapeHtml(t('sensorBtn'))}</button>
-                        </div>
-                        ${sensorBadgeHtml}
-                    </div>
-                </section>
-
-                <!-- KARTE 3: WETTER & ZERO-BEDINGUNGEN -->
-                <section class="card">
-                    <div class="flex-between">
-                        <h2>${escapeHtml(t('weatherSection'))} ${infoBtnHtml('density_altitude')}</h2>
-                        <button type="button" class="btn btn-primary btn-sm" id="btn-fetch-weather">🌦 ${escapeHtml(t('fetchWeatherBtn'))}</button>
-                    </div>
-
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="calc-temp">${escapeHtml(t('tempLabel'))} (${isImp() ? '°F' : '°C'})</label>
-                            <input type="number" step="0.5" id="calc-temp" value="${fmtTempInput(state.calc.tempC)}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-pressure">${escapeHtml(t('pressureLabel'))}</label>
-                            <input type="number" step="1" id="calc-pressure" value="${state.calc.pressureHpa}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="calc-humidity">${escapeHtml(t('humidityLabel'))}</label>
-                            <input type="number" step="1" min="0" max="100" id="calc-humidity" value="${state.calc.humidityPercent}" />
-                        </div>
-                    </div>
-
-                    <div class="sub-box">
-                        <div class="flex-between">
-                            <strong>${escapeHtml(t('zeroWeatherSection'))} ${infoBtnHtml('zero_conditions')}</strong>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="calc-same-weather" ${state.calc.sameWeatherAsCurrent ? 'checked' : ''} />
-                                <span>${escapeHtml(t('sameWeatherAsCurrent'))}</span>
-                            </label>
-                        </div>
-                        ${!state.calc.sameWeatherAsCurrent ? `
-                            <div class="form-row three-cols" style="margin-top:0.6rem;">
-                                <div class="form-group">
-                                    <label for="calc-zero-temp">${escapeHtml(t('zeroTempLabel'))} (${isImp() ? '°F' : '°C'})</label>
-                                    <input type="number" step="0.5" id="calc-zero-temp" value="${fmtTempInput(state.calc.zeroTempC)}" />
-                                </div>
-                                <div class="form-group">
-                                    <label for="calc-zero-pressure">${escapeHtml(t('zeroPressureLabel'))}</label>
-                                    <input type="number" step="1" id="calc-zero-pressure" value="${state.calc.zeroPressureHpa}" />
-                                </div>
-                                <div class="form-group">
-                                    <label for="calc-zero-humidity">${escapeHtml(t('zeroHumidityLabel'))}</label>
-                                    <input type="number" step="1" min="0" max="100" id="calc-zero-humidity" value="${state.calc.zeroHumidityPercent}" />
-                                </div>
-                            </div>
-                        ` : ''}
-                    </div>
-                </section>
-            </div>
-
-            <!-- KENNZAHLEN-ÜBERSICHT (E0, Dichtehöhe, Transsonik, Spin Drift Info) -->
-            <section class="kpi-strip">
-                <div class="kpi-box">
-                    <span class="kpi-label">${escapeHtml(t('e0Label'))}</span>
-                    <strong class="kpi-value">${fmtEnergyDisplay(resA.e0Joules)}</strong>
-                </div>
-                <div class="kpi-box">
-                    <span class="kpi-label">${escapeHtml(t('densityAltLabel'))}</span>
-                    <strong class="kpi-value">${fmtAltitudeDisplay(resA.atmosphere.densityAltitudeMeters)}</strong>
-                </div>
-                <div class="kpi-box">
-                    <span class="kpi-label">${escapeHtml(t('airDensityLabel'))}</span>
-                    <strong class="kpi-value">${resA.atmosphere.airDensity.toFixed(3)} kg/m³</strong>
-                </div>
-                <div class="kpi-box">
-                    <span class="kpi-label">${escapeHtml(t('transonicLabel'))}</span>
-                    <strong class="kpi-value">${escapeHtml(transonicDisp)}</strong>
-                </div>
-            </section>
-
-            <!-- DYNAMISCHER SVG-GRAPH -->
-            <section class="card">
-                ${renderTrajectorySvg(resA, resB)}
-            </section>
-
-            <!-- BALLISTIK-DATENTABELLE -->
-            <section class="card">
-                <div class="flex-between" style="margin-bottom:0.75rem;">
-                    <h2>${escapeHtml(t('tabCalc'))} (${state.calc.clickUnit === 'MOA' ? '1/4 MOA' : '0.1 MIL'}) ${infoBtnHtml('spindrift')}</h2>
-                    <button type="button" class="btn btn-primary" id="btn-send-to-log">📓 ${escapeHtml(t('toLogBtn'))}</button>
-                </div>
-                <div class="table-responsive">
-                    <table class="ballistics-table">
-                        <thead>
-                            <tr>
-                                <th>${escapeHtml(t('tableDist'))}</th>
-                                <th>${escapeHtml(t('tableDrop'))}</th>
-                                <th>${escapeHtml(t('tableMil'))}</th>
-                                <th>${escapeHtml(t('tableClicks'))}</th>
-                                <th>${escapeHtml(t('tableVel'))}</th>
-                                <th>${escapeHtml(t('tableEnergy'))}</th>
-                                <th>${escapeHtml(t('tableTof'))}</th>
-                                <th>${escapeHtml(t('tableCoriolis'))}</th>
-                                <th>${escapeHtml(t('tableSpin'))}</th>
-                                <th>${escapeHtml(t('tableWind'))}</th>
-                                ${resB ? `<th>${escapeHtml(t('tableDiff'))}</th>` : ''}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${rowsHtml}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-        `;
+        return '<div class="test-case"><span class="badge ' + (r.passed ? 'badge-ok' : 'badge-warn') + '">' +
+          esc(r.passed ? t('testPassed') : t('testFailed')) + '</span> <b>' + esc(r.name) + '</b><ul>' + checks + '</ul></div>';
+      }).join('');
     }
+    sec.innerHTML =
+        '<div class="card"><h3>' + esc(t('language')) + ' · ' + esc(t('units')) + ' · ' + esc(t('theme')) + ' · ' + esc(t('view')) + '</h3>' +
+        '<div class="field-grid">' +
+        '<label class="field"><span class="field-label">' + esc(t('language')) + '</span>' +
+          selectHtml('set.lang', [{ value: 'de', label: 'Deutsch' }, { value: 'en', label: 'English' }], state.lang) + '</label>' +
+        '<label class="field"><span class="field-label">' + esc(t('units')) + '</span>' +
+          selectHtml('set.units', [{ value: 'metric', label: t('metric') }, { value: 'imperial', label: t('imperial') }], state.units) + '</label>' +
+        '<label class="field"><span class="field-label">' + esc(t('theme')) + '</span>' +
+          selectHtml('set.theme', [{ value: 'dark', label: t('dark') }, { value: 'light', label: t('light') }], state.theme) + '</label>' +
+        '<label class="field"><span class="field-label">' + esc(t('view')) + '</span>' +
+          selectHtml('set.view', [{ value: 'full', label: t('viewFull') }, { value: 'compact', label: t('viewCompact') }], state.view) + '</label>' +
+        '</div></div>' +
+      '<div class="card"><h3>' + esc(t('dbVersions')) + '</h3>' +
+        '<div class="chips">' + chip(t('dbLong'), vl) + chip(t('dbShort'), vs) + '</div>' +
+        (stub ? '<div class="notice notice-warn">' + esc(t('stubWarning')) + '</div>' : '') +
+        (!state.dbOk ? '<div class="notice notice-warn">' + esc(t('dbError')) + '</div>' : '') + '</div>' +
+      '<div class="card"><h3>' + esc(t('selfTest')) + '</h3>' + (testHtml || '<p class="hint">…</p>') + '</div>' +
+      '<div class="card"><h3>' + esc(t('dataManagement')) + '</h3><div class="btn-row wrap">' +
+        '<button class="btn" data-action="export" data-what="profiles">⬇ ' + esc(t('exportProfiles')) + '</button>' +
+        '<button class="btn" data-action="export" data-what="overrides">⬇ ' + esc(t('exportOverrides')) + '</button>' +
+        '<button class="btn" data-action="export" data-what="logbook">⬇ ' + esc(t('exportLogbook')) + '</button>' +
+        '<button class="btn" data-action="export" data-what="all">⬇ ' + esc(t('exportAll')) + '</button>' +
+        '<button class="btn btn-primary" data-action="import">⬆ ' + esc(t('importData')) + '</button>' +
+        '<button class="btn btn-danger" data-action="reset-all">🗑 ' + esc(t('resetAll')) + '</button>' +
+      '</div></div>' +
+      '<div class="card"><p class="hint">' + esc(t('disclaimer')) + '</p></div>';
+  }
 
-    function renderWeaponsTab() {
-        const activeWeapon = getActiveWeapon();
-        const cal = getCaliberById(activeWeapon ? activeWeapon.caliberId : state.calc.caliberFilter);
+  /* --------------------------------------------------------------------------
+   * Modals: Lexikon, Laborierungs-Editor, Profil, Logbuch
+   * ------------------------------------------------------------------------*/
+  function openModal(html) {
+    var mr = document.getElementById('modal-root');
+    mr.innerHTML = '<div class="modal-overlay" data-action="modal-close"><div class="modal" role="dialog" aria-modal="true">' +
+      '<button class="modal-x" data-action="modal-close" aria-label="' + esc(t('close')) + '">✕</button>' + html + '</div></div>';
+  }
+  function closeModal() {
+    var mr = document.getElementById('modal-root');
+    if (mr) mr.innerHTML = '';
+  }
 
-        // Miller-Stabilitäts-Check für aktive Waffe + aktuelle Laborierung
-        const miller = BallisticsEngine.calculateMillerStability({
-            caliberInches: cal ? cal.diameterIn : 0.308,
-            bulletWeightGrains: state.calc.bulletWeightGrains,
-            twistRateInches: activeWeapon ? activeWeapon.twistRateIn : 10,
-            v0Ms: state.calc.v0Ms,
-            tempC: state.calc.tempC,
-            pressureHpa: state.calc.pressureHpa
-        });
+  function openLexicon(topic) {
+    var keys = Object.keys(LEXICON);
+    var tabs = keys.map(function (k) {
+      return '<button class="seg-btn' + (k === topic ? ' active' : '') + '" data-action="lexicon" data-topic="' + k + '">' + esc(LEXICON[k].title[state.lang === 'en' ? 1 : 0]) + '</button>';
+    }).join('');
+    var e = LEXICON[topic] || LEXICON.bc;
+    var li = state.lang === 'en' ? 1 : 0;
+    openModal('<h2>' + esc(t('lexicon')) + '</h2><div class="segmented lex-tabs">' + tabs + '</div>' +
+      '<h3>' + esc(e.title[li]) + '</h3><p>' + esc(e.body[li]) + '</p>' +
+      '<p><a class="wiki-link" href="' + esc(e.wiki[li]) + '" target="_blank" rel="noopener noreferrer">Wikipedia ↗</a></p>');
+  }
 
-        let millerBadge = '';
-        if (miller.status === 'unstable') {
-            millerBadge = `<span class="badge badge-danger">✖ ${escapeHtml(t('millerUnstable'))}</span>`;
-        } else if (miller.status === 'marginal') {
-            millerBadge = `<span class="badge badge-warning">⚠ ${escapeHtml(t('millerMarginal'))}</span>`;
-        } else if (miller.status === 'optimal') {
-            millerBadge = `<span class="badge badge-success">✔ ${escapeHtml(t('millerOptimal'))}</span>`;
-        } else {
-            millerBadge = `<span class="badge badge-warning">⚠ ${escapeHtml(t('millerOver'))}</span>`;
+  /* Laborierungs-Editor: Overrides über der Basis-DB, Standardgewicht als Vorbelegung. */
+  function openLoadingEditor(type, caliber, name) {
+    var list = loadingsOf(type, caliber);
+    var item = null;
+    for (var i = 0; i < list.length; i++) if (list[i].entry.n === name) item = list[i];
+    if (!item) return;
+    var e = item.entry;
+    var base = dbOf(type)[caliber][item.baseIndex];
+    var meta = (metaOf(type) || {})[caliber] || {};
+    var weightPrefill = e.g != null ? e.g : (meta.standardWeight != null ? meta.standardWeight : null);
+    var refRows = '';
+    if (base.ref && Array.isArray(base.ref.distances)) {
+      base.ref.distances.forEach(function (d, idx) {
+        refRows += '<tr><td class="num">' + d + ' m</td>' +
+          '<td><input class="input" type="number" step="any" data-field="ov.refV.' + idx + '" value="' + inputValue(e.ref.v ? e.ref.v[idx] : null) + '"></td>' +
+          '<td><input class="input" type="number" step="any" data-field="ov.refE.' + idx + '" value="' + inputValue(e.ref.e ? e.ref.e[idx] : null) + '"></td></tr>';
+      });
+    }
+    var dropRows = '';
+    if (base.dropCm && Array.isArray(base.dropCm.distances)) {
+      base.dropCm.distances.forEach(function (d, idx) {
+        dropRows += '<tr><td class="num">' + d + ' m</td>' +
+          '<td><input class="input" type="number" step="any" data-field="ov.drop.' + idx + '" value="' + inputValue(e.dropCm.values ? e.dropCm.values[idx] : null) + '"></td></tr>';
+      });
+    }
+    openModal('<h2>' + esc(t('loadingEditor')) + '</h2>' +
+      '<h3>' + esc(caliber) + ' · ' + esc(name) + '</h3>' +
+      '<p class="hint">' + esc(t('editorHint')) + '</p>' +
+      '<div class="field-grid">' +
+        fieldHtml(t('bcG1'), 'ov.bcG1', e.bcG1, { step: '0.001', topic: 'bc' }) +
+        fieldHtml(t('bcG7'), 'ov.bcG7', e.bcG7, { step: '0.001' }) +
+        fieldHtml(t('v0'), 'ov.v0', e.v0, { step: '1' }) +
+        fieldHtml(t('barrelDb'), 'ov.barrelMm', e.barrelMm, { step: '1' }) +
+        fieldHtml(t('weight') + (e.g == null && meta.standardWeight != null ? ' · ' + t('prefillWeight') : ''), 'ov.g', weightPrefill, { step: '1' }) +
+      '</div>' +
+      (refRows ? '<h4>' + esc(t('refValues')) + '</h4><div class="table-scroll"><table class="data-table"><thead><tr><th>m</th><th>' + esc(t('velocity')) + ' (m/s)</th><th>' + esc(t('energy')) + ' (J)</th></tr></thead><tbody>' + refRows + '</tbody></table></div>' : '') +
+      (dropRows ? '<h4>' + esc(t('dropValues')) + '</h4><div class="table-scroll"><table class="data-table"><thead><tr><th>m</th><th>cm</th></tr></thead><tbody>' + dropRows + '</tbody></table></div>' : '') +
+      '<div class="btn-row"><button class="btn btn-primary" data-action="save-override" data-type="' + type + '" data-caliber="' + esc(caliber) + '" data-name="' + esc(name) + '">' + esc(t('saveOverride')) + '</button>' +
+      (item.overridden ? '<button class="btn btn-danger" data-action="reset-override" data-type="' + type + '" data-caliber="' + esc(caliber) + '" data-name="' + esc(name) + '">' + esc(t('resetOverride')) + '</button>' : '') +
+      '<button class="btn btn-ghost" data-action="modal-close">' + esc(t('cancel')) + '</button></div>');
+  }
+
+  function collectModalFields(prefix) {
+    var out = {};
+    document.querySelectorAll('#modal-root [data-field^="' + prefix + '"]').forEach(function (el) {
+      out[el.getAttribute('data-field').slice(prefix.length)] = el.value;
+    });
+    return out;
+  }
+
+  function saveOverride(type, caliber, name) {
+    var raw = collectModalFields('ov.');
+    var fields = { bcG1: num(raw.bcG1), bcG7: num(raw.bcG7), v0: num(raw.v0), barrelMm: num(raw.barrelMm), g: num(raw.g) };
+    var refV = [], refE = [], drop = [];
+    Object.keys(raw).forEach(function (k) {
+      var m = k.match(/^refV\.(\d+)$/); if (m) refV[+m[1]] = num(raw[k]);
+      m = k.match(/^refE\.(\d+)$/); if (m) refE[+m[1]] = num(raw[k]);
+      m = k.match(/^drop\.(\d+)$/); if (m) drop[+m[1]] = num(raw[k]);
+    });
+    state.overrides[overrideKey(type, caliber, name)] = { fields: fields, refV: refV, refE: refE, drop: drop };
+    saveEnvelope(APP_ID + '.overrides', state.overrides);
+    closeModal();
+    renderAmmoSelects(); renderCompareSelects(); renderResults();
+    toast(t('overrideSaved'));
+  }
+
+  /* Profil-Modal */
+  function openProfileModal(id) {
+    var p = null;
+    if (id) for (var i = 0; i < state.profiles.length; i++) if (state.profiles[i].id === id) p = state.profiles[i];
+    var isNew = !p;
+    if (isNew) p = { id: uid(), name: '', type: state.weaponType, caliber: state.sel[state.weaponType].caliber, barrelIn: null, twistIn: null, zeroM: null, sightHeightCm: null };
+    var cals = calibersOf(p.type);
+    openModal('<h2>' + esc(isNew ? t('newProfile') : t('edit')) + '</h2>' +
+      '<div class="field-grid">' +
+      '<label class="field"><span class="field-label">' + esc(t('profileName')) + '</span><input class="input" type="text" data-field="pf.name" value="' + esc(p.name) + '"></label>' +
+      '<label class="field"><span class="field-label">' + esc(t('weaponType')) + '</span>' +
+        selectHtml('pf.type', [{ value: 'long', label: t('tabLong') }, { value: 'short', label: t('tabShort') }], p.type) + '</label>' +
+      '<label class="field"><span class="field-label">' + esc(t('caliber')) + '</span>' +
+        selectHtml('pf.caliber', cals.map(function (c) { return { value: c, label: c }; }), p.caliber) + '</label>' +
+      fieldHtml(t('barrelIn'), 'pf.barrelIn', p.barrelIn, { step: '0.5', min: 0 }) +
+      fieldHtml(t('twist'), 'pf.twistIn', p.twistIn, { step: '0.5' }) +
+      fieldHtml(t('zero') + ' (m)', 'pf.zeroM', p.zeroM, { step: '5', min: 5, placeholder: String(defaultZero(p.type)) }) +
+      fieldHtml(t('sightHeight'), 'pf.sightHeightCm', p.sightHeightCm, { step: '0.5', min: 0 }) +
+      '</div><p class="hint">' + esc(t('barrelMmHint')) + (p.barrelIn != null ? fmt(p.barrelIn * 25.4, 0) + ' mm' : '–') + '</p>' +
+      '<div class="btn-row"><button class="btn btn-primary" data-action="save-profile" data-id="' + p.id + '" data-new="' + (isNew ? '1' : '0') + '">' + esc(t('saveProfile')) + '</button>' +
+      '<button class="btn btn-ghost" data-action="modal-close">' + esc(t('cancel')) + '</button></div>');
+  }
+
+  function saveProfile(id, isNew) {
+    var raw = collectModalFields('pf.');
+    var p = {
+      id: id, name: (raw.name || '').trim() || t('newProfile'),
+      type: raw.type === 'short' ? 'short' : 'long',
+      caliber: raw.caliber || null,
+      barrelIn: num(raw.barrelIn), twistIn: num(raw.twistIn),
+      zeroM: num(raw.zeroM), sightHeightCm: num(raw.sightHeightCm)
+    };
+    if (isNew === '1') state.profiles.push(p);
+    else state.profiles = state.profiles.map(function (q) { return q.id === id ? p : q; });
+    saveEnvelope(APP_ID + '.profiles', state.profiles);
+    closeModal(); renderProfiles(); renderResults();
+    toast(t('profileSaved'));
+  }
+
+  /* Logbuch-Modal */
+  function openLogModal(id) {
+    var e = null;
+    if (id) for (var i = 0; i < state.logbook.length; i++) if (state.logbook[i].id === id) e = state.logbook[i];
+    var isNew = !e;
+    var profile = activeProfile();
+    var selA = state.dbOk ? resolveSelection(state.weaponType, state.sel[state.weaponType]) : null;
+    if (isNew) e = {
+      id: uid(), date: new Date().toISOString().slice(0, 10),
+      weapon: profile ? profile.name : '', ammo: selA ? selA.caliber + ' · ' + selA.entry.n : '',
+      distanceM: null, groupCm: null, weather: '', note: ''
+    };
+    openModal('<h2>' + esc(isNew ? t('newEntry') : t('edit')) + '</h2>' +
+      '<div class="field-grid">' +
+      '<label class="field"><span class="field-label">' + esc(t('date')) + '</span><input class="input" type="date" data-field="lb.date" value="' + esc(e.date) + '"></label>' +
+      '<label class="field"><span class="field-label">' + esc(t('weapon')) + '</span><input class="input" type="text" data-field="lb.weapon" value="' + esc(e.weapon) + '"></label>' +
+      '<label class="field"><span class="field-label">' + esc(t('ammo')) + '</span><input class="input" type="text" data-field="lb.ammo" value="' + esc(e.ammo) + '"></label>' +
+      fieldHtml(t('distance') + ' (m)', 'lb.distanceM', e.distanceM, { step: '5', min: 0 }) +
+      fieldHtml(t('groupSize') + ' (cm)', 'lb.groupCm', e.groupCm, { step: '0.1', min: 0 }) +
+      '<label class="field wide"><span class="field-label">' + esc(t('weather')) + '</span><input class="input" type="text" data-field="lb.weather" value="' + esc(e.weather) + '">' +
+      '<button class="btn btn-small" data-action="log-use-weather">☁ ' + esc(t('useWeather')) + '</button></label>' +
+      '<label class="field wide"><span class="field-label">' + esc(t('note')) + '</span><textarea class="input" rows="3" data-field="lb.note">' + esc(e.note) + '</textarea></label>' +
+      '</div>' +
+      '<div class="btn-row"><button class="btn btn-primary" data-action="save-log" data-id="' + e.id + '" data-new="' + (isNew ? '1' : '0') + '">' + esc(t('saveEntry')) + '</button>' +
+      '<button class="btn btn-ghost" data-action="modal-close">' + esc(t('cancel')) + '</button></div>');
+  }
+
+  function saveLog(id, isNew) {
+    var raw = collectModalFields('lb.');
+    var e = {
+      id: id, date: raw.date || null, weapon: raw.weapon || '', ammo: raw.ammo || '',
+      distanceM: num(raw.distanceM), groupCm: num(raw.groupCm),
+      weather: raw.weather || '', note: raw.note || ''
+    };
+    if (isNew === '1') state.logbook.unshift(e);
+    else state.logbook = state.logbook.map(function (q) { return q.id === id ? e : q; });
+    saveEnvelope(APP_ID + '.logbook', state.logbook);
+    closeModal(); renderLogbook();
+    toast(t('entrySaved'));
+  }
+
+  /* --------------------------------------------------------------------------
+   * Toasts mit Undo-Aktion
+   * ------------------------------------------------------------------------*/
+  var toastActions = {};
+  function toast(msg, actionLabel, onAction) {
+    var id = uid();
+    var tr = document.getElementById('toast-root');
+    if (!tr) return;
+    var div = document.createElement('div');
+    div.className = 'toast';
+    div.setAttribute('data-toast', id);
+    div.innerHTML = '<span>' + esc(msg) + '</span>' +
+      (actionLabel ? '<button class="btn btn-small" data-action="toast-action" data-id="' + id + '">' + esc(actionLabel) + '</button>' : '');
+    tr.appendChild(div);
+    if (onAction) toastActions[id] = onAction;
+    setTimeout(function () {
+      div.classList.add('out');
+      setTimeout(function () { div.remove(); delete toastActions[id]; }, 350);
+    }, actionLabel ? 8000 : 3500);
+  }
+
+  /* --------------------------------------------------------------------------
+   * GPS, Wetter (Open-Meteo, nie gecacht), Kompass-Snapshot
+   * ------------------------------------------------------------------------*/
+  function requestGps() {
+    if (!navigator.geolocation) { toast(t('gpsError')); return; }
+    try {
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        state.env.latitudeDeg = Math.round(pos.coords.latitude * 1000) / 1000;
+        state.env.altitudeM = pos.coords.altitude != null ? Math.round(pos.coords.altitude) : state.env.altitudeM;
+        state.env.locationName = 'GPS ' + pos.coords.latitude.toFixed(3) + ', ' + pos.coords.longitude.toFixed(3);
+        var gpsLocationEl = document.getElementById('gps-location');
+        if (gpsLocationEl) {
+       gpsLocationEl.textContent = state.env.locationName;
+       }
+      
+        
+        state.lastWeather = state.lastWeather || null;
+        state.gpsLon = pos.coords.longitude;
+        persistSettings(); renderCalcSection();
+        toast(t('gpsOk'));
+      }, function () { toast(t('gpsError')); }, { timeout: 8000, maximumAge: 60000 });
+    } catch (e) { toast(t('gpsError')); }
+  }
+
+  function applyCity(idx) {
+    var c = CITIES[idx];
+    if (!c) return;
+    state.env.latitudeDeg = c.lat;
+    state.env.altitudeM = c.alt;
+    state.env.locationName = c.n + ' (' + c.c + ')';
+    state.gpsLon = c.lon;
+    persistSettings(); renderCalcSection();
+  }
+
+  function fetchWeather() {
+    var lat = num(state.env.latitudeDeg);
+    var lon = num(state.gpsLon);
+    if (lat === null || lon === null) { toast(t('gpsError')); return; }
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon +
+      '&current=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m&wind_speed_unit=ms';
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 10000) : null;
+    // Wetter-API wird NIE gecacht: cache 'no-store', Service Worker umgeht sie ebenfalls.
+    fetch(url, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { if (!r.ok) throw new Error('http'); return r.json(); })
+      .then(function (j) {
+        if (timer) clearTimeout(timer);
+        var c = j && j.current;
+        if (!c) throw new Error('data');
+        state.env.tempC = num(c.temperature_2m);
+        state.env.humidityPct = num(c.relative_humidity_2m);
+        state.env.pressureHpa = num(c.surface_pressure);
+        state.env.windSpeedMs = num(c.wind_speed_10m) || 0;
+        var absDir = num(c.wind_direction_10m);
+        if (absDir !== null) {
+          state.env.windAngleDeg = Math.round((absDir - (num(state.env.azimuthDeg) || 0) + 360) % 360);
         }
+        state.lastWeather = {
+          tempC: num(c.temperature_2m), humidityPct: num(c.relative_humidity_2m),
+          pressureHpa: num(c.surface_pressure), windSpeedMs: num(c.wind_speed_10m),
+          windDirDeg: absDir, location: state.env.locationName || (lat + ',' + lon),
+          time: new Date().toLocaleTimeString(state.lang === 'de' ? 'de-DE' : 'en-US', { hour: '2-digit', minute: '2-digit' })
+        };
+        persistSettings(); renderCalcSection();
+        toast(t('weatherLoaded'));
+      })
+      .catch(function () { if (timer) clearTimeout(timer); toast(t('weatherError')); });
+  }
 
-        return `
-            <div class="grid-layout">
-                <!-- WAFFENPROFIL ANLEGEN -->
-                <section class="card">
-                    <h2>${escapeHtml(t('weaponFormTitle'))}</h2>
-                    <form id="weapon-form">
-                        <div class="form-group">
-                            <label for="w-name">${escapeHtml(t('weaponName'))}</label>
-                            <input type="text" id="w-name" required placeholder="z. B. Tikka T3x TAC A1" />
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="w-caliber">${escapeHtml(t('weaponCaliber'))}</label>
-                                <select id="w-caliber">
-                                    ${CALIBERS.map(c => `<option value="${c.id}" ${c.id === '308win' ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="w-barrel">${escapeHtml(t('barrelLen'))}</label>
-                                <input type="number" step="0.5" id="w-barrel" value="24" />
-                            </div>
-                        </div>
-                        <div class="form-row three-cols">
-                            <div class="form-group">
-                                <label for="w-twist">${escapeHtml(t('twistRate'))}</label>
-                                <input type="number" step="0.25" id="w-twist" value="10" required />
-                            </div>
-                            <div class="form-group">
-                                <label for="w-twist-dir">${escapeHtml(t('twistDir'))}</label>
-                                <select id="w-twist-dir">
-                                    <option value="right">${escapeHtml(t('twistRight'))}</option>
-                                    <option value="left">${escapeHtml(t('twistLeft'))}</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="w-sight">${escapeHtml(t('sightHeight'))} (cm)</label>
-                                <input type="number" step="0.1" id="w-sight" value="5.0" required />
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-primary">${escapeHtml(t('saveWeaponBtn'))}</button>
-                    </form>
-                </section>
-
-                <!-- MILLER-STABILITÄTS-CHECK -->
-                <section class="card">
-                    <h2>${escapeHtml(t('millerTitle'))} ${infoBtnHtml('miller')}</h2>
-                    <p class="hint">
-                        ${escapeHtml(activeWeapon ? activeWeapon.name : '')} (${escapeHtml(cal ? cal.name : '')}, Twist 1:${activeWeapon ? activeWeapon.twistRateIn : 10}")
-                        · ${state.calc.bulletWeightGrains} gr @ ${state.calc.v0Ms} m/s
-                    </p>
-                    <div class="kpi-strip" style="margin-top:0.75rem;">
-                        <div class="kpi-box">
-                            <span class="kpi-label">${escapeHtml(t('millerSg'))}</span>
-                            <strong class="kpi-value">${miller.sg.toFixed(2)}</strong>
-                            <div>${millerBadge}</div>
-                        </div>
-                        <div class="kpi-box">
-                            <span class="kpi-label">${escapeHtml(t('millerLenCal'))}</span>
-                            <strong class="kpi-value">${miller.lengthCalibers.toFixed(2)} cal</strong>
-                        </div>
-                    </div>
-
-                    <hr class="divider" />
-
-                    <!-- EIGENE LABORIERUNG ANLEGEN -->
-                    <h2>${escapeHtml(t('customLoadTitle'))}</h2>
-                    <form id="custom-load-form">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="cl-caliber">${escapeHtml(t('caliber'))}</label>
-                                <select id="cl-caliber">
-                                    ${CALIBERS.map(c => `<option value="${c.id}" ${c.id === state.calc.caliberFilter ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="cl-name">${escapeHtml(t('customLoadName'))}</label>
-                                <input type="text" id="cl-name" required placeholder="z. B. Handladung Lapua Scenar 167gr" />
-                            </div>
-                        </div>
-                        <div class="form-row three-cols">
-                            <div class="form-group">
-                                <label for="cl-grains">${escapeHtml(t('bulletWeight'))}</label>
-                                <input type="number" step="0.1" id="cl-grains" required value="168" />
-                            </div>
-                            <div class="form-group">
-                                <label for="cl-bc">BC (G1)</label>
-                                <input type="number" step="0.001" id="cl-bc" required value="0.500" />
-                            </div>
-                            <div class="form-group">
-                                <label for="cl-v0">V0 (m/s)</label>
-                                <input type="number" step="1" id="cl-v0" required value="800" />
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-primary">${escapeHtml(t('saveCustomLoadBtn'))}</button>
-                    </form>
-                </section>
-            </div>
-
-            <!-- GESPEICHERTE WAFFEN -->
-            <section class="card">
-                <h2>${escapeHtml(t('savedWeaponsTitle'))}</h2>
-                <div class="weapon-list">
-                    ${state.weapons.map(w => {
-                        const wCal = getCaliberById(w.caliberId);
-                        const isActive = w.id === state.activeWeaponId;
-                        return `
-                            <div class="weapon-item ${isActive ? 'active' : ''}">
-                                <div>
-                                    <strong>${escapeHtml(w.name)}</strong> ${isActive ? `<span class="badge badge-success">✔ ${escapeHtml(t('activeWeapon'))}</span>` : ''}
-                                    <div class="hint">
-                                        ${escapeHtml(wCal ? wCal.name : w.caliberId)} · Lauf: ${w.barrelLengthIn || 24}" · Twist: 1:${w.twistRateIn}" (${w.twistDirection === 'left' ? t('twistLeft') : t('twistRight')}) · Visierhöhe: ${w.sightHeightCm} cm
-                                    </div>
-                                </div>
-                                <div class="btn-group">
-                                    <button type="button" class="btn btn-secondary btn-sm btn-select-weapon" data-id="${w.id}">${escapeHtml(t('useWeaponBtn'))}</button>
-                                    ${state.weapons.length > 1 ? `<button type="button" class="btn btn-danger btn-sm btn-delete-weapon" data-id="${w.id}">${escapeHtml(t('deleteBtn'))}</button>` : ''}
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            </section>
-
-            <!-- DATENSICHERUNG (JSON EXPORT / IMPORT) -->
-            <section class="card">
-                <h2>${escapeHtml(t('backupTitle'))} (v${APP_VERSION})</h2>
-                <div class="btn-group">
-                    <button type="button" class="btn btn-primary" id="btn-export-json">⬇ ${escapeHtml(t('exportJsonBtn'))}</button>
-                    <label class="btn btn-secondary" for="input-import-json" style="cursor:pointer;">
-                        ⬆ ${escapeHtml(t('importJsonBtn'))}
-                    </label>
-                    <input type="file" id="input-import-json" accept="application/json" style="display:none;" />
-                </div>
-            </section>
-        `;
-    }
-
-    function renderLogbookTab() {
-        const draft = state.logDraft || {};
-
-        return `
-            <section class="card">
-                <h2>${escapeHtml(t('logTitle'))}</h2>
-                <form id="logbook-form">
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="log-date">${escapeHtml(t('logDate'))}</label>
-                            <input type="date" id="log-date" required value="${escapeHtml(draft.date || new Date().toISOString().slice(0, 10))}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="log-weapon">${escapeHtml(t('logWeapon'))}</label>
-                            <select id="log-weapon">
-                                ${state.weapons.map(w => `<option value="${w.id}" ${w.id === draft.weaponId ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="log-distance">${escapeHtml(t('logDistance'))} (m)</label>
-                            <input type="number" step="1" id="log-distance" required value="${escapeHtml(draft.distanceM || 100)}" />
-                        </div>
-                    </div>
-
-                    <div class="form-row three-cols">
-                        <div class="form-group">
-                            <label for="log-caliber">${escapeHtml(t('caliber'))}</label>
-                            <input type="text" id="log-caliber" required value="${escapeHtml(draft.caliberName || '.308 Win')}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="log-load">${escapeHtml(t('loadSelect'))}</label>
-                            <input type="text" id="log-load" required value="${escapeHtml(draft.loadName || '')}" />
-                        </div>
-                        <div class="form-group">
-                            <label for="log-group">${escapeHtml(t('logGroup'))}</label>
-                            <input type="number" step="0.1" id="log-group" value="${escapeHtml(draft.groupSizeMm || '')}" placeholder="z. B. 18.5" />
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="log-weather">${escapeHtml(t('logWeather'))}</label>
-                            <input type="text" id="log-weather" value="${escapeHtml(draft.weatherShort || '')}" placeholder="z. B. 18°C, 1015 hPa, leichter Seitenwind" />
-                        </div>
-                        <div class="form-group">
-                            <label for="log-notes">${escapeHtml(t('logNotes'))}</label>
-                            <input type="text" id="log-notes" required value="${escapeHtml(draft.notes || '')}" placeholder="Trefferlage, Klick-Korrektur, Besonderheiten..." />
-                        </div>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary">${escapeHtml(t('saveLogBtn'))}</button>
-                </form>
-            </section>
-
-            <section class="card">
-                <div class="log-list">
-                    ${state.logbook.map(entry => `
-                        <article class="log-entry">
-                            <div class="flex-between">
-                                <div>
-                                    <strong>${escapeHtml(entry.date)}</strong> · <strong>${escapeHtml(entry.weaponName)}</strong> (${escapeHtml(entry.caliberName)})
-                                </div>
-                                <button type="button" class="btn btn-danger btn-sm btn-delete-log" data-id="${entry.id}">${escapeHtml(t('deleteBtn'))}</button>
-                            </div>
-                            <div class="hint" style="margin:0.3rem 0;">
-                                ${escapeHtml(entry.loadName)} · <strong>${entry.distanceM} m</strong>
-                                ${entry.groupSizeMm ? ` · Streukreis: <strong>${escapeHtml(entry.groupSizeMm)} mm</strong>` : ''}
-                                ${entry.weatherShort ? ` · ${escapeHtml(entry.weatherShort)}` : ''}
-                            </div>
-                            <p>${escapeHtml(entry.notes)}</p>
-                        </article>
-                    `).join('')}
-                </div>
-            </section>
-        `;
-    }
-
-    function renderLexiconTab() {
-        const lang = state.lang === 'en' ? 'en' : 'de';
-        return `
-            <section class="card">
-                <h2>${escapeHtml(t('tabLexicon'))}</h2>
-                <div class="lexicon-grid">
-                    ${LEXICON_ITEMS.map(item => `
-                        <article class="lexicon-card">
-                            <h3>${escapeHtml(item.title[lang])}</h3>
-                            <p>${escapeHtml(item.desc[lang])}</p>
-                            <a href="${escapeHtml(item.wiki[lang])}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">
-                                ${escapeHtml(t('openWiki'))} ↗
-                            </a>
-                        </article>
-                    `).join('')}
-                </div>
-            </section>
-        `;
-    }
-
-    // -------------------------------------------------------------------------
-    // 13. HAUPT-RENDER & EVENT-BINDING
-    // -------------------------------------------------------------------------
-    function render() {
-        const app = document.getElementById('app');
-        if (!app) return;
-
-        let mainContent = '';
-        if (state.activeTab === 'calc') mainContent = renderCalculatorTab();
-        else if (state.activeTab === 'weapons') mainContent = renderWeaponsTab();
-        else if (state.activeTab === 'log') mainContent = renderLogbookTab();
-        else if (state.activeTab === 'lexicon') mainContent = renderLexiconTab();
-
-        app.innerHTML = `
-            <header class="app-header">
-                <div class="header-top">
-                    <div class="brand">
-                        <h1>🎯 ${escapeHtml(t('appTitle'))}</h1>
-                    </div>
-                    <div class="header-controls">
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-units" aria-label="Toggle Units">
-                            ${state.units === 'metric' ? 'Metrisch (m / °C / cm)' : 'Imperial (yd / °F / in)'}
-                        </button>
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-lang" aria-label="Toggle Language">
-                            ${state.lang === 'de' ? 'DE 🇩🇪' : 'EN 🇬🇧'}
-                        </button>
-                    </div>
-                </div>
-
-                <div class="disclaimer-bar" role="note">
-                    ⚠️ ${escapeHtml(t('disclaimerBanner'))}
-                </div>
-
-                <nav class="tab-nav" aria-label="Hauptnavigation">
-                    <button type="button" class="tab-btn ${state.activeTab === 'calc' ? 'active' : ''}" data-tab="calc">${escapeHtml(t('tabCalc'))}</button>
-                    <button type="button" class="tab-btn ${state.activeTab === 'weapons' ? 'active' : ''}" data-tab="weapons">${escapeHtml(t('tabWeapons'))}</button>
-                    <button type="button" class="tab-btn ${state.activeTab === 'log' ? 'active' : ''}" data-tab="log">${escapeHtml(t('tabLog'))}</button>
-                    <button type="button" class="tab-btn ${state.activeTab === 'lexicon' ? 'active' : ''}" data-tab="lexicon">${escapeHtml(t('tabLexicon'))}</button>
-                </nav>
-            </header>
-
-            ${statusBannerMsg ? `
-                <div class="status-banner ${statusBannerType}" role="status">
-                    <span>${escapeHtml(statusBannerMsg)}</span>
-                    <button type="button" class="close-banner" id="btn-close-banner" aria-label="Schließen">×</button>
-                </div>
-            ` : ''}
-
-            <main class="app-main">
-                ${mainContent}
-            </main>
-
-            <footer class="app-footer">
-                <p><strong>${escapeHtml(t('disclaimerBanner'))}</strong></p>
-                <p>${escapeHtml(t('privacyFooter'))} (v${APP_VERSION})</p>
-            </footer>
-
-            ${renderLexiconModal()}
-        `;
-
-        bindEvents();
-    }
-
-    function bindEvents() {
-        // Header Sprache & Einheiten
-        document.getElementById('btn-toggle-lang')?.addEventListener('click', () => {
-            state.lang = state.lang === 'de' ? 'en' : 'de';
-            saveState();
-            render();
-        });
-
-        document.getElementById('btn-toggle-units')?.addEventListener('click', () => {
-            state.units = state.units === 'metric' ? 'imperial' : 'metric';
-            saveState();
-            render();
-        });
-
-        // Navigation Tabs
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                state.activeTab = btn.dataset.tab;
-                statusBannerMsg = '';
-                saveState();
-                render();
-            });
-        });
-
-        // Status-Banner schließen
-        document.getElementById('btn-close-banner')?.addEventListener('click', () => {
-            statusBannerMsg = '';
-            render();
-        });
-
-        // Info-Buttons (Lexikon-Modal öffnen)
-        document.querySelectorAll('.info-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                activeModalLexiconId = btn.dataset.lexicon;
-                render();
-            });
-        });
-
-        document.getElementById('close-lexicon-modal')?.addEventListener('click', () => {
-            activeModalLexiconId = null;
-            render();
-        });
-
-        document.getElementById('lexicon-modal-backdrop')?.addEventListener('click', (e) => {
-            if (e.target.id === 'lexicon-modal-backdrop') {
-                activeModalLexiconId = null;
-                render();
-            }
-        });
-
-        // Rechner-Eingaben binden
-        if (state.activeTab === 'calc') {
-            document.getElementById('calc-caliber-filter')?.addEventListener('change', (e) => {
-                state.calc.caliberFilter = e.target.value;
-                const match = getAllLoads().find(l => state.calc.caliberFilter === 'all' || l.caliber === state.calc.caliberFilter);
-                if (match) {
-                    state.calc.loadId = match.id;
-                    state.calc.bulletWeightGrains = match.grains;
-                    state.calc.bc = match.bc;
-                    state.calc.v0Ms = match.v0;
-                }
-                saveState();
-                render();
-            });
-
-            document.getElementById('calc-load-search')?.addEventListener('input', (e) => {
-                state.calc.loadSearch = e.target.value;
-                saveState();
-                render();
-                const el = document.getElementById('calc-load-search');
-                if (el) {
-                    el.focus();
-                    el.setSelectionRange(el.value.length, el.value.length);
-                }
-            });
-
-            document.getElementById('calc-load-select')?.addEventListener('change', (e) => {
-                applyLoadToCalc(e.target.value, false);
-            });
-
-            const bindNum = (id, handler) => {
-                document.getElementById(id)?.addEventListener('change', (e) => {
-                    handler(e.target.value);
-                    saveState();
-                    render();
-                });
-            };
-
-            bindNum('calc-grains', v => { state.calc.bulletWeightGrains = parseFloat(v) || 168; });
-            bindNum('calc-bc', v => { state.calc.bc = Math.max(0.01, parseFloat(v) || 0.5); });
-            bindNum('calc-v0', v => { state.calc.v0Ms = Math.max(50, parseVelInput(v) || 800); });
-            bindNum('calc-sight-height', v => { state.calc.sightHeightCm = parseSightInput(v); });
-            bindNum('calc-zero', v => { state.calc.zeroDistanceM = Math.max(10, parseDistInput(v) || 100); });
-            bindNum('calc-max', v => { state.calc.maxDistanceM = Math.max(25, Math.min(3000, parseDistInput(v) || 600)); });
-            bindNum('calc-step', v => { state.calc.stepDistanceM = parseInt(v, 10) || 50; });
-            bindNum('calc-wind-speed', v => { state.calc.windSpeedMs = Math.max(0, parseWindInput(v) || 0); });
-            bindNum('calc-wind-dir', v => { state.calc.windDirectionDeg = ((parseFloat(v) || 0) % 360 + 360) % 360; });
-            bindNum('calc-shot-angle', v => { state.calc.shotAngleDeg = Math.max(-85, Math.min(85, parseFloat(v) || 0)); });
-            bindNum('calc-lat', v => { state.calc.latitudeDeg = Math.max(-90, Math.min(90, isFinite(parseFloat(v)) ? parseFloat(v) : 48.7)); });
-            bindNum('calc-azimuth', v => { state.calc.azimuthDeg = ((parseFloat(v) || 0) % 360 + 360) % 360; });
-            bindNum('calc-temp', v => { state.calc.tempC = parseTempInput(v); });
-            bindNum('calc-pressure', v => { state.calc.pressureHpa = Math.max(300, parseFloat(v) || 1013); });
-            bindNum('calc-humidity', v => { state.calc.humidityPercent = Math.max(0, Math.min(100, isFinite(parseFloat(v)) ? parseFloat(v) : 50)); });
-            bindNum('calc-zero-temp', v => { state.calc.zeroTempC = parseTempInput(v); });
-            bindNum('calc-zero-pressure', v => { state.calc.zeroPressureHpa = Math.max(300, parseFloat(v) || 1013); });
-            bindNum('calc-zero-humidity', v => { state.calc.zeroHumidityPercent = Math.max(0, Math.min(100, isFinite(parseFloat(v)) ? parseFloat(v) : 50)); });
-
-            document.getElementById('calc-drag-model')?.addEventListener('change', (e) => {
-                state.calc.dragModel = e.target.value === 'G7' ? 'G7' : 'G1';
-                saveState();
-                render();
-            });
-
-            document.getElementById('calc-click-unit')?.addEventListener('change', (e) => {
-                state.calc.clickUnit = e.target.value === 'MOA' ? 'MOA' : 'MIL';
-                saveState();
-                render();
-            });
-
-            document.getElementById('calc-same-weather')?.addEventListener('change', (e) => {
-                state.calc.sameWeatherAsCurrent = e.target.checked;
-                saveState();
-                render();
-            });
-
-            document.getElementById('calc-compare-toggle')?.addEventListener('change', (e) => {
-                state.calc.compareEnabled = e.target.checked;
-                saveState();
-                render();
-            });
-
-            document.getElementById('comp-caliber')?.addEventListener('change', (e) => {
-                state.calc.compareCaliberId = e.target.value;
-                const first = getAllLoads().find(l => l.caliber === state.calc.compareCaliberId);
-                if (first) applyLoadToCalc(first.id, true);
-                else { saveState(); render(); }
-            });
-
-            document.getElementById('comp-load')?.addEventListener('change', (e) => {
-                applyLoadToCalc(e.target.value, true);
-            });
-
-            bindNum('comp-grains', v => { state.calc.compareGrains = parseFloat(v) || 140; });
-            bindNum('comp-bc', v => { state.calc.compareBc = Math.max(0.01, parseFloat(v) || 0.5); });
-            bindNum('comp-v0', v => { state.calc.compareV0Ms = Math.max(50, parseVelInput(v) || 820); });
-
-            document.getElementById('geo-city-select')?.addEventListener('change', (e) => {
-                const lat = parseFloat(e.target.value);
-                if (isFinite(lat)) {
-                    state.calc.latitudeDeg = lat;
-                    saveState();
-                    render();
-                }
-            });
-
-            document.getElementById('btn-fetch-weather')?.addEventListener('click', fetchWeatherByGps);
-            document.getElementById('btn-sensor-snapshot')?.addEventListener('click', startSensorSnapshot);
-            document.getElementById('btn-send-to-log')?.addEventListener('click', sendCurrentCalcToLogbook);
+  /* Kompass: 5 Messungen in 2 Sekunden, Kreismittelwert, Ampel 3°/8°. */
+  var sensorHandler = null, sensorTimer = null;
+  function sensorSnapshot() {
+    if (state.sensorRunning) return;
+    if (typeof DeviceOrientationEvent === 'undefined') { toast(t('sensorNone')); return; }
+    function start() {
+      state.sensorRunning = true;
+      renderCalcSection();
+      var latest = null;
+      var samples = [];
+      sensorHandler = function (ev) {
+        var h = null;
+        if (typeof ev.webkitCompassHeading === 'number' && isFinite(ev.webkitCompassHeading)) h = ev.webkitCompassHeading;
+        else if (ev.alpha != null && isFinite(ev.alpha)) h = (360 - ev.alpha) % 360;
+        if (h !== null) latest = h;
+      };
+      window.addEventListener('deviceorientation', sensorHandler, true);
+      var ticks = 0;
+      sensorTimer = setInterval(function () {
+        ticks++;
+        if (latest !== null) samples.push(latest);
+        if (ticks >= 5) {
+          clearInterval(sensorTimer); sensorTimer = null;
+          window.removeEventListener('deviceorientation', sensorHandler, true);
+          sensorHandler = null;
+          state.sensorRunning = false;
+          if (samples.length < 3) { toast(t('sensorNone')); renderCalcSection(); return; }
+          var sinSum = 0, cosSum = 0;
+          samples.forEach(function (h) { sinSum += Math.sin(h * Math.PI / 180); cosSum += Math.cos(h * Math.PI / 180); });
+          var mean = (Math.atan2(sinSum, cosSum) * 180 / Math.PI + 360) % 360;
+          var r = Math.sqrt(sinSum * sinSum + cosSum * cosSum) / samples.length;
+          var spread = r > 0.999999 ? 0 : Math.sqrt(Math.max(0, -2 * Math.log(Math.max(r, 1e-9)))) * 180 / Math.PI;
+          state.sensor = { headingDeg: mean, spreadDeg: spread, at: Date.now() };
+          renderCalcSection();
         }
-
-        // Waffen & Laborierungen Tab
-        if (state.activeTab === 'weapons') {
-            document.getElementById('weapon-form')?.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const name = document.getElementById('w-name').value.trim();
-                const caliberId = document.getElementById('w-caliber').value;
-                const barrelLengthIn = parseFloat(document.getElementById('w-barrel').value) || 24;
-                const twistRateIn = parseFloat(document.getElementById('w-twist').value) || 10;
-                const twistDirection = document.getElementById('w-twist-dir').value === 'left' ? 'left' : 'right';
-                const sightHeightCm = parseFloat(document.getElementById('w-sight').value) || 5.0;
-
-                const newWeapon = {
-                    id: 'w_' + Date.now(),
-                    name: name || 'Waffe',
-                    caliberId,
-                    barrelLengthIn,
-                    twistRateIn,
-                    twistDirection,
-                    sightHeightCm
-                };
-                state.weapons.push(newWeapon);
-                selectWeapon(newWeapon.id);
-            });
-
-            document.getElementById('custom-load-form')?.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const caliber = document.getElementById('cl-caliber').value;
-                const fullName = document.getElementById('cl-name').value.trim();
-                const grains = parseFloat(document.getElementById('cl-grains').value) || 168;
-                const bc = parseFloat(document.getElementById('cl-bc').value) || 0.5;
-                const v0 = parseFloat(document.getElementById('cl-v0').value) || 800;
-
-                const newLoad = {
-                    id: 'custom_' + Date.now(),
-                    caliber,
-                    maker: 'Custom',
-                    bullet: fullName || 'Eigene Ladung',
-                    grains,
-                    bc,
-                    v0
-                };
-                state.customLoads.unshift(newLoad);
-                applyLoadToCalc(newLoad.id, false);
-                setNotice(t('savedMsg'), 'success');
-            });
-
-            document.querySelectorAll('.btn-select-weapon').forEach(btn => {
-                btn.addEventListener('click', () => selectWeapon(btn.dataset.id));
-            });
-
-            document.querySelectorAll('.btn-delete-weapon').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    if (state.weapons.length <= 1) return;
-                    state.weapons = state.weapons.filter(w => w.id !== btn.dataset.id);
-                    if (state.activeWeaponId === btn.dataset.id) {
-                        state.activeWeaponId = state.weapons[0].id;
-                    }
-                    saveState();
-                    render();
-                });
-            });
-
-            document.getElementById('btn-export-json')?.addEventListener('click', exportBackupJson);
-            document.getElementById('input-import-json')?.addEventListener('change', (e) => {
-                importBackupJson(e.target.files[0]);
-            });
-        }
-
-        // Schießtagebuch Tab
-        if (state.activeTab === 'log') {
-            document.getElementById('logbook-form')?.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const weaponId = document.getElementById('log-weapon').value;
-                const w = state.weapons.find(item => item.id === weaponId);
-
-                const entry = {
-                    id: 'log_' + Date.now(),
-                    date: document.getElementById('log-date').value,
-                    weaponId,
-                    weaponName: w ? w.name : 'Waffe',
-                    caliberName: document.getElementById('log-caliber').value.trim(),
-                    loadName: document.getElementById('log-load').value.trim(),
-                    distanceM: parseFloat(document.getElementById('log-distance').value) || 100,
-                    groupSizeMm: document.getElementById('log-group').value.trim(),
-                    weatherShort: document.getElementById('log-weather').value.trim(),
-                    notes: document.getElementById('log-notes').value.trim()
-                };
-
-                state.logbook.unshift(entry);
-                state.logDraft = { ...state.logDraft, groupSizeMm: '', notes: '' };
-                saveState();
-                setNotice(t('savedMsg'), 'success');
-            });
-
-            document.querySelectorAll('.btn-delete-log').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    state.logbook = state.logbook.filter(item => item.id !== btn.dataset.id);
-                    saveState();
-                    render();
-                });
-            });
-        }
+      }, 400);
     }
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission().then(function (res) {
+        if (res === 'granted') start(); else toast(t('sensorPermission'));
+      }).catch(function () { toast(t('sensorPermission')); });
+    } else start();
+  }
 
-    // Service Worker Registrierung (für Offline-Fähigkeit)
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js').catch(err => {
-                console.warn('Service Worker Registrierung fehlgeschlagen:', err);
-            });
+  /* --------------------------------------------------------------------------
+   * Export / Import (Profile, Overrides, Logbuch)
+   * ------------------------------------------------------------------------*/
+  function exportData(what) {
+    var payload = { app: APP_ID, version: STORAGE_VERSION, type: what, exportedAt: new Date().toISOString(), data: null };
+    if (what === 'profiles') payload.data = state.profiles;
+    else if (what === 'overrides') payload.data = state.overrides;
+    else if (what === 'logbook') payload.data = state.logbook;
+    else payload.data = { profiles: state.profiles, overrides: state.overrides, logbook: state.logbook };
+    try {
+      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = APP_ID + '-' + what + '-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      toast(t('exportDone'));
+    } catch (e) { toast(t('importError')); }
+  }
+
+  function importFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var j = JSON.parse(String(reader.result));
+        if (!j || j.app !== APP_ID || !j.type) throw new Error('format');
+        if (j.type === 'profiles' && Array.isArray(j.data)) {
+          state.profiles = j.data.filter(function (p) { return p && p.id && p.name; });
+          saveEnvelope(APP_ID + '.profiles', state.profiles);
+        } else if (j.type === 'overrides' && j.data && typeof j.data === 'object') {
+          state.overrides = j.data;
+          saveEnvelope(APP_ID + '.overrides', state.overrides);
+        } else if (j.type === 'logbook' && Array.isArray(j.data)) {
+          state.logbook = j.data.filter(function (e) { return e && e.id; });
+          saveEnvelope(APP_ID + '.logbook', state.logbook);
+        } else if (j.type === 'all' && j.data) {
+          if (Array.isArray(j.data.profiles)) { state.profiles = j.data.profiles; saveEnvelope(APP_ID + '.profiles', state.profiles); }
+          if (j.data.overrides && typeof j.data.overrides === 'object') { state.overrides = j.data.overrides; saveEnvelope(APP_ID + '.overrides', state.overrides); }
+          if (Array.isArray(j.data.logbook)) { state.logbook = j.data.logbook; saveEnvelope(APP_ID + '.logbook', state.logbook); }
+        } else throw new Error('format');
+        renderProfiles(); renderLogbook(); renderAmmoSelects(); renderResults();
+        toast(t('importOk'));
+      } catch (e) { toast(t('importError')); }
+    };
+    reader.onerror = function () { toast(t('importError')); };
+    reader.readAsText(file);
+  }
+
+  /* --------------------------------------------------------------------------
+   * Ereignisse (Delegation, keine Listener-Leaks bei Re-Renders)
+   * ------------------------------------------------------------------------*/
+  function onClick(ev) {
+    var el = ev.target.closest('[data-action]');
+    if (!el) return;
+    var action = el.getAttribute('data-action');
+    if (action === 'modal-close' && el.classList.contains('modal-overlay') && ev.target !== el) return;
+    switch (action) {
+      case 'nav': showSection(el.getAttribute('data-section')); break;
+      case 'toggle-theme': state.theme = state.theme === 'dark' ? 'light' : 'dark'; persistSettings(); buildShell(); break;
+      case 'toggle-lang': state.lang = state.lang === 'de' ? 'en' : 'de'; persistSettings(); buildShell(); break;
+      case 'toggle-units': state.units = isImp() ? 'metric' : 'imperial'; persistSettings(); buildShell(); break;
+      case 'toggle-view': state.view = state.view === 'compact' ? 'full' : 'compact'; persistSettings(); buildShell(); break;
+      case 'weapon-type': {
+        var type = el.getAttribute('data-type');
+        if (type !== state.weaponType) {
+          state.weaponType = type;
+          state.shot.zeroM = null; // Zero-Standard je Typ: 100 m lang, 25 m kurz.
+          state.shot.sightHeightCm = null;
+          persistSettings(); renderCalcSection();
+        }
+        break;
+      }
+      case 'lexicon': openLexicon(el.getAttribute('data-topic') || 'bc'); break;
+      case 'modal-close': closeModal(); break;
+      case 'edit-loading': openLoadingEditor(el.getAttribute('data-type'), el.getAttribute('data-caliber'), el.getAttribute('data-name')); break;
+      case 'save-override': saveOverride(el.getAttribute('data-type'), el.getAttribute('data-caliber'), el.getAttribute('data-name')); break;
+      case 'reset-override': {
+        delete state.overrides[overrideKey(el.getAttribute('data-type'), el.getAttribute('data-caliber'), el.getAttribute('data-name'))];
+        saveEnvelope(APP_ID + '.overrides', state.overrides);
+        closeModal(); renderAmmoSelects(); renderCompareSelects(); renderResults();
+        toast(t('overrideReset'));
+        break;
+      }
+      case 'new-profile': openProfileModal(null); break;
+      case 'edit-profile': openProfileModal(el.getAttribute('data-id')); break;
+      case 'save-profile': saveProfile(el.getAttribute('data-id'), el.getAttribute('data-new')); break;
+      case 'apply-profile': {
+        var p = null;
+        state.profiles.forEach(function (q) { if (q.id === el.getAttribute('data-id')) p = q; });
+        if (p) {
+          state.activeProfileId = p.id;
+          state.weaponType = p.type || 'long';
+          if (p.caliber) state.sel[state.weaponType].caliber = p.caliber;
+          state.shot.zeroM = p.zeroM != null ? p.zeroM : null;
+          state.shot.sightHeightCm = p.sightHeightCm != null ? p.sightHeightCm : null;
+          persistSettings(); renderCalcSection(); renderProfiles();
+          toast(t('profileApplied'));
+        }
+        break;
+      }
+      case 'delete-profile': {
+        var id = el.getAttribute('data-id');
+        var removed = null;
+        state.profiles = state.profiles.filter(function (q) { if (q.id === id) { removed = q; return false; } return true; });
+        if (state.activeProfileId === id) state.activeProfileId = null;
+        saveEnvelope(APP_ID + '.profiles', state.profiles);
+        renderProfiles(); renderResults();
+        toast(t('profileDeleted'), t('undo'), function () {
+          if (removed) { state.profiles.push(removed); saveEnvelope(APP_ID + '.profiles', state.profiles); renderProfiles(); toast(t('restored')); }
         });
+        break;
+      }
+      case 'new-log': openLogModal(null); break;
+      case 'edit-log': openLogModal(el.getAttribute('data-id')); break;
+      case 'save-log': saveLog(el.getAttribute('data-id'), el.getAttribute('data-new')); break;
+      case 'log-use-weather': {
+        var w = state.lastWeather;
+        var input = document.querySelector('#modal-root [data-field="lb.weather"]');
+        if (input && w) input.value = fmt(w.tempC, 1) + ' °C, ' + fmt(w.pressureHpa, 0) + ' hPa, ' + fmt(w.humidityPct, 0) + ' %, ' + t('windFrom') + ' ' + fmt(w.windDirDeg, 0) + '° ' + fmt(w.windSpeedMs, 1) + ' m/s';
+        else if (!w) toast(t('weatherError'));
+        break;
+      }
+      case 'delete-log': {
+        var lid = el.getAttribute('data-id');
+        var gone = null;
+        state.logbook = state.logbook.filter(function (q) { if (q.id === lid) { gone = q; return false; } return true; });
+        saveEnvelope(APP_ID + '.logbook', state.logbook);
+        renderLogbook();
+        toast(t('entryDeleted'), t('undo'), function () {
+          if (gone) { state.logbook.unshift(gone); saveEnvelope(APP_ID + '.logbook', state.logbook); renderLogbook(); toast(t('restored')); }
+        });
+        break;
+      }
+      case 'gps': requestGps(); break;
+      case 'weather': fetchWeather(); break;
+      case 'sensor': sensorSnapshot(); break;
+      case 'apply-azimuth': {
+        if (state.sensor) {
+          state.env.azimuthDeg = Math.round(state.sensor.headingDeg);
+          persistSettings(); renderCalcSection();
+        }
+        break;
+      }
+      case 'export': exportData(el.getAttribute('data-what')); break;
+      case 'import': document.getElementById('import-file').click(); break;
+      case 'reset-all': {
+        if (window.confirm(t('resetConfirm'))) {
+          ['settings', 'profiles', 'overrides', 'logbook'].forEach(function (k) {
+            try { localStorage.removeItem(APP_ID + '.' + k); } catch (e) {}
+          });
+          toast(t('resetDone'));
+          setTimeout(function () { location.reload(); }, 600);
+        }
+        break;
+      }
+      case 'toast-action': {
+        var fn = toastActions[el.getAttribute('data-id')];
+        if (fn) { fn(); delete toastActions[el.getAttribute('data-id')]; }
+        var toastEl = el.closest('.toast');
+        if (toastEl) toastEl.remove();
+        break;
+      }
     }
+  }
 
-    // Initiales Rendering beim Laden
-    document.addEventListener('DOMContentLoaded', render);
+  function onChange(ev) {
+    var el = ev.target.closest('[data-field]');
+    if (!el) return;
+    var field = el.getAttribute('data-field');
+    var value = el.type === 'checkbox' ? el.checked : el.value;
+    if (field === 'import-file') return;
+    if (el.id === 'import-file') return;
+    switch (field) {
+      case 'ammo.caliber':
+        state.sel[state.weaponType].caliber = value;
+        state.sel[state.weaponType].name = null;
+        persistSettings(); renderAmmoSelects(); renderResults(); break;
+      case 'ammo.loading': {
+        var sel = resolveSelection(state.weaponType, state.sel[state.weaponType]);
+        if (sel && sel.list[+value]) state.sel[state.weaponType].name = sel.list[+value].entry.n;
+        persistSettings(); renderResults(); break;
+      }
+      case 'compareOn':
+        state.compareOn = !!value; persistSettings(); renderCompareSelects(); renderResults(); break;
+      case 'cmp.type':
+        state.cmp.type = value; state.cmp.caliber = null; state.cmp.name = null;
+        persistSettings(); renderCompareSelects(); renderResults(); break;
+      case 'cmp.caliber':
+        state.cmp.caliber = value; state.cmp.name = null;
+        persistSettings(); renderCompareSelects(); renderResults(); break;
+      case 'cmp.loading': {
+        var cs = resolveSelection(state.cmp.type, state.cmp);
+        if (cs && cs.list[+value]) state.cmp.name = cs.list[+value].entry.n;
+        persistSettings(); renderResults(); break;
+      }
+      case 'city': if (value !== '') applyCity(+value); break;
+      case 'env.windUnit': state.env.windUnit = value; persistSettings(); renderCalcSection(); break;
+      case 'env.windSpeed': {
+        var v = num(value);
+        state.env.windSpeedMs = v === null ? 0 : (state.env.windUnit === 'kmh' ? v / 3.6 : v);
+        persistSettings(); renderResults(); break;
+      }
+      case 'env.tempC': state.env.tempC = num(value); persistSettings(); renderResults(); break;
+      case 'env.pressureHpa': state.env.pressureHpa = num(value); persistSettings(); renderResults(); break;
+      case 'env.humidityPct': state.env.humidityPct = num(value); persistSettings(); renderResults(); break;
+      case 'env.altitudeM': state.env.altitudeM = num(value); persistSettings(); renderResults(); break;
+      case 'env.latitudeDeg': state.env.latitudeDeg = num(value); persistSettings(); renderResults(); break;
+      case 'env.azimuthDeg': state.env.azimuthDeg = num(value); persistSettings(); renderResults(); break;
+      case 'env.shotAngleDeg': state.env.shotAngleDeg = num(value); persistSettings(); renderResults(); break;
+      case 'env.enableCoriolis': state.env.enableCoriolis = !!value; persistSettings(); renderResults(); break;
+      case 'env.enableSpinDrift': state.env.enableSpinDrift = !!value; persistSettings(); renderResults(); break;
+      case 'shot.zeroDisplay': {
+        var z = num(value);
+        state.shot.zeroM = z === null ? null : (isImp() ? B.convert.ydToM(z) : z);
+        persistSettings(); renderResults(); break;
+      }
+      case 'shot.sightHeightCm': state.shot.sightHeightCm = num(value); persistSettings(); renderResults(); break;
+      case 'shot.clickUnit': state.shot.clickUnit = value; persistSettings(); renderResults(); break;
+      case 'shot.dragModel': state.shot.dragModel = value; persistSettings(); renderResults(); break;
+      case 'shot.extended': state.shot.extended = !!value; persistSettings(); renderResults(); break;
+      case 'shot.show25': state.shot.show25 = !!value; persistSettings(); renderResults(); break;
+      case 'set.lang': state.lang = value; persistSettings(); buildShell(); break;
+      case 'set.units': state.units = value; persistSettings(); buildShell(); break;
+      case 'set.theme': state.theme = value; persistSettings(); buildShell(); break;
+      case 'set.view': state.view = value; persistSettings(); buildShell(); break;
+      case 'pf.type': {
+        // Kaliberliste im Profil-Modal passend zum Typ neu aufbauen.
+        var calSel = document.querySelector('#modal-root [data-field="pf.caliber"]');
+        if (calSel) {
+          calSel.innerHTML = calibersOf(value).map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('');
+        }
+        break;
+      }
+      default: break; // Modal-Felder (ov.*, pf.*, lb.*) werden erst beim Speichern gelesen.
+    }
+  }
+
+  function onInput(ev) {
+    var el = ev.target.closest('[data-field]');
+    if (!el) return;
+    var field = el.getAttribute('data-field');
+    if (field === 'env.windAngleDeg') {
+      state.env.windAngleDeg = num(el.value) || 0;
+      var lbl = document.getElementById('wind-angle-val');
+      if (lbl) lbl.textContent = fmt(state.env.windAngleDeg, 0) + '°';
+      persistSettings(); renderResults();
+    } else if (field === 'pf.barrelIn') {
+      // Live-Hinweis Zoll -> mm im Profil-Modal.
+      var hint = document.querySelector('#modal-root .hint');
+      var mm = num(el.value);
+      if (hint) hint.textContent = t('barrelMmHint') + (mm != null ? fmt(mm * 25.4, 0) + ' mm' : '–');
+    }
+  }
+
+  /* --------------------------------------------------------------------------
+   * Boot
+   * ------------------------------------------------------------------------*/
+  function boot() {
+    root = document.getElementById('app');
+    if (!root || !B) {
+      // Ohne Engine kein Betrieb: sichtbare Fehlermeldung statt Absturz.
+      if (root) root.innerHTML = '<div class="db-error" role="alert">ballistics.js nicht geladen.</div>';
+      return;
+    }
+    restoreState();
+    validateDatabases();
+    buildShell();
+    root.addEventListener('click', onClick);
+    root.addEventListener('change', onChange);
+    root.addEventListener('input', onInput);
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeModal(); });
+    document.getElementById('import-file').addEventListener('change', function (ev) {
+      if (ev.target.files && ev.target.files[0]) importFile(ev.target.files[0]);
+      ev.target.value = '';
+    });
+    // Physik-Selbsttest asynchron nach dem ersten Rendern.
+    setTimeout(function () {
+      try { state.selfTest = B.selfTest(); } catch (e) { state.selfTest = null; }
+      renderSettings();
+    }, 60);
+    // Service Worker registrieren (offline-Fähigkeit), nie auf file://.
+    if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./sw.js').catch(function () { /* offline-Cache optional */ });
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();
